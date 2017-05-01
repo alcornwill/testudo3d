@@ -24,7 +24,7 @@ bl_info = {
     "location": "space bar search (for now)",
     "description": "build structures quickly out of reusable modules",
     "warning": "",
-    # "wiki_url": "https://github.com/alcornwill/modular_building_tool/wiki",  # todo
+    "wiki_url": "https://github.com/alcornwill/modular_building_tool",
     "category": "3D View",
 }
 
@@ -59,30 +59,12 @@ class ModuleGroup:
     def active_module(self):
         return self.modules[self.active]
 
-def update_3dview():
-    for window in bpy.context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type == 'VIEW_3D':
-                area.tag_redraw()
-
-def get_modules_at_cursor():
-    return get_objects_at(cursor_pos)
-
-def get_objects_at(pos):
-    # get objects near pos, relative to root_obj
-    rel_pos = root_obj.matrix_world.inverted() * pos
-    childs = root_obj.children
-    size = len(childs)
-    kd = mathutils.kdtree.KDTree(size)
-
-    for i, child in enumerate(childs):
-        kd.insert(child.location, i)
-    kd.balance()
-
-    return [childs[index] for pos, index, dist in kd.find_range(rel_pos, 0.5)]
+class ModularBuildingTool:
+    def __init__(self):
+        self.paint=False
 
 room_info = {}
-room_modes = ("Active Module", "Weighted Random", "Dither")
+ROOM_MODES = ("Active Module", "Weighted Random", "Dither")
 
 # todo hmm we need a tool panel, with 'metadata path' text input and browse button
 #   and maybe select active root_obj
@@ -118,13 +100,35 @@ cursor_pos = Vector((0,0,0))
 #cursor_tilt = 0  # may be useful for slopes (like rollarcoaster tycoon)
 cursor_rot = 0
 
-face = (Vector((-0.5,0.5,-0.5)), Vector((0.5,0.5,-0.5)), Vector((0.5,0.5,0.5)), Vector((-0.5,0.5,0.5)))
-arrow = (Vector((-0.4,-0.4,0)), Vector((0.4,-0.4,0)), Vector((0,0.6,0)))
-red = (1.0, 0.0, 0.0, 0.7)
-green = (0.0, 1.0, 0.0, 0.7)
-blue = (0.0, 0.0, 1.0, 0.7)
-white = (1.0, 1.0, 1.0, 1)
-yellow = (1.0, 1.0, 0.0, 1)
+ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
+RED = (1.0, 0.0, 0.0, 0.7)
+GREEN = (0.0, 1.0, 0.0, 0.7)
+BLUE = (0.0, 0.0, 1.0, 0.7)
+WHITE = (1.0, 1.0, 1.0, 1)
+YELLOW = (1.0, 1.0, 0.0, 1)
+
+def update_3dview():
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+def get_modules_at_cursor():
+    return get_objects_at(cursor_pos)
+
+def get_objects_at(pos):
+    # get objects near pos, relative to root_obj
+    rel_pos = root_obj.matrix_world.inverted() * pos
+    childs = root_obj.children
+    size = len(childs)
+    kd = mathutils.kdtree.KDTree(size)
+
+    for i, child in enumerate(childs):
+        kd.insert(child.location, i)
+    kd.balance()
+
+    return [childs[index] for pos, index, dist in kd.find_range(rel_pos, 0.5)]
+
 
 def get_key(dict, key, default=None):
     if key in dict:
@@ -211,10 +215,10 @@ def draw_callback_3d(self, context):
     mat = mat_trans * mat_rot   
     mat = mat_world * mat
     
-    color = blue
+    color = BLUE
     if grab:
-        color = green
-    t_arrow = mat_transform(mat, arrow)
+        color = GREEN
+    t_arrow = mat_transform(mat, ARROW)
 
     bgl.glBegin(bgl.GL_LINES)
     draw_poly(t_arrow, color)
@@ -225,7 +229,7 @@ def draw_callback_3d(self, context):
     bgl.glDisable(bgl.GL_BLEND)
     bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
 
-def draw_text_2d(text, size=20, color=white):
+def draw_text_2d(text, size=20, color=WHITE):
     font_id = 0  # XXX, need to find out how best to get this.
     bgl.glColor4f(*color)
     blf.position(font_id, text_cursor.x, text_cursor.y, 0)
@@ -244,17 +248,17 @@ def draw_callback_2d(self, context):
     act_g = get_active_group()
     if act_g is not None:
         if act_g.name == "room":
-            draw_text_2d("room", size=15, color=yellow)
-            draw_text_2d(room_modes[act_g.active], size=20, color=yellow)
+            draw_text_2d("room", size=15, color=YELLOW)
+            draw_text_2d(ROOM_MODES[act_g.active], size=20, color=YELLOW)
         else:
             act = act_g.active_module()
             draw_text_2d(act.g_name, size=15) # group name
             draw_text_2d(act.name) # module name
     else:
-        draw_text_2d("No modules found", size=15, color=red)
+        draw_text_2d("No modules found", size=15, color=RED)
 
     # info
-    color = white
+    color = WHITE
     draw_text_2d("cursor pos: {}, {}, {}".format(int(cursor_pos.x), int(cursor_pos.y), int(cursor_pos.z)), size=15, color=color)
     #draw_text_2d("modules at cursor: {}".format(len(cell.modules)), size=12, color=green)
     #draw_text_2d("cell occupied: {}".format(cell.occupied), size=12, color=green)
