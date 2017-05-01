@@ -1,0 +1,18 @@
+{
+    "Wall1": {
+        "type": "wall",
+        "weight": 1.0
+    },
+    "Wall2": {
+        "type": "wall",
+        "weight": 0.5
+    },
+    "Floor1": {
+        "type": "floor",
+        "weight": 1.0
+    },
+    "Floor2": {
+        "type": "floor",
+        "weight": 0.1
+    }
+}
