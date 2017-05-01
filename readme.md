@@ -25,9 +25,7 @@ there are 3 paint modes:
 * __Weighted Random__: uses weights defined in metadata
 * __Dither__: dither between the first two modules in the group  
 (could be useful for windows)
-#### Known Issues
-* 3D cursor arrow is not always visible as not drawn on top of objects
-#usage
+# usage
 MBT uses the mesh data in your blend file to build with    
 ##### workflow
 * link your .blend file with your modules in (file->link)  
