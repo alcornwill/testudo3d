@@ -54,16 +54,10 @@ can be anything, but some have special meaning
 * (G to grab. still buggy)
 # usage advanced
 once you exit the tool, you can move the root object and rotate it. scaling is not recommended  
-#### constraints and empties
-you can go even further with modularity by joining together rooms with constraints
-* make the rooms with MBT, then create empties at the entrances 
-* properties -> constraints -> add constraint -> copy location   
-* select another portal empty as the target and they should stick together in a chain
-* (don't you need to do parenting somewhere?)
+#### constraints
+you can go even further with modularity by joining together rooms with constraints    
+__Connect Portals__ is another feature of MBT to make this easier  
+* select two objects
+* SPACE > Connect Portals
 
-this makes it very easy to swap rooms around. you could write a script to procedurally generate dungeons this way (maybe I will)	
-#### join mesh
-if you want to join together multiple modules into a single mesh
-* A to select all
-* CTRL J to join
-* SPACE -> remove duplicate vertices
+this will create a CopyLocation and CopyRotation constraint on the first object

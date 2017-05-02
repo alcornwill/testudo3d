@@ -21,8 +21,8 @@ bl_info = {
     "author": "Will Alcorn",
     "version": (0, 1),
     "blender": (2, 78, 0),
-    "location": "space bar search (for now)",
-    "description": "build structures quickly out of reusable modules",
+    "location": "3D View > Tools > MBT",
+    "description": "create modular scenes",
     "warning": "",
     "wiki_url": "https://github.com/alcornwill/modular_building_tool",
     "category": "3D View",
@@ -36,14 +36,28 @@ import json
 import mathutils
 import math
 import random
+#noinspection PyUnresolvedReferences
 from mathutils import Vector
+#noinspection PyUnresolvedReferences
+from bpy.props import (StringProperty,
+                       BoolProperty,
+                       IntProperty,
+                       FloatProperty,
+                       EnumProperty,
+                       PointerProperty,
+                       )
+#noinspection PyUnresolvedReferences
+from bpy.types import (Panel,
+                       Operator,
+                       PropertyGroup,
+                       )
 
-class vec2:
+class Vec2:
     def __init__(self, x, y):
         self.x = x
         self.y = y
 
-text_cursor = vec2(0,0)  # used for UI
+text_cursor = Vec2(0, 0)  # used for UI
 
 ROOM_MODES = ("Active Module", "Weighted Random", "Dither")
 # todo room should derive 'Painter', modes should derive 'PainterMode'?
@@ -111,13 +125,12 @@ def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
     bgl.glVertex3f(*end)
 
-def draw_poly(poly, color, width=1):
-    bgl.glLineWidth(width)
+def draw_poly(poly, color):
+    bgl.glBegin(bgl.GL_POLYGON)
     bgl.glColor4f(*color)
     for i in range(len(poly) - 1):
         draw_line_3d(poly[i], poly[i + 1])
-    # close
-    draw_line_3d(poly[len(poly) - 1], poly[0])
+    bgl.glEnd()
 
 def mat_transform(mat, poly):
     return [mat * v for v in poly]
@@ -184,17 +197,34 @@ class RestoreCursorPos:
     def __exit__(self, exc_type, exc_value, traceback):
         self.mbt.cursor_pos = self.original_pos
 
-class ModularBuildingTool(bpy.types.Operator):
-    bl_idname = "view3d.modular_building_tool"
-    bl_label = "Modular Building Tool"
+class ModularBuildingToolProperties(PropertyGroup):
+    metadata_path = StringProperty(
+        name = "Metadata Path",
+        description = "Path to metadata json file",
+        default = "C:\\Users\\alcor_000\\Projects\\modular_building_tool\\metadata.json",
+        subtype = "FILE_PATH"
+      )
 
-    # why is this class so big!
+class ModularBuildingToolPanel(Panel):
+    bl_idname = "view3d.modular_building_tool_panel"
+    bl_label = "Modular Building Tool Panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'TOOLS'
+    bl_category = "MBT"
+    bl_context = "objectmode"
+
+    def draw(self, context):
+        layout = self.layout
+        mbt = context.scene.mbt
+
+        layout.prop(mbt, 'metadata_path', text="")
+        layout.operator(ModularBuildingMode.bl_idname)
+
+class ModularBuildingTool:
     def __init__(self):
-        super().__init__()
         self._handle_3d = None
         self._handle_2d = None
         self.room_info = {}
-        self.metadata_path = None
         self.metadata = None
         self.root_obj = None
         self.module_groups = {}  # each group contains a list of modules
@@ -236,29 +266,6 @@ class ModularBuildingTool(bpy.types.Operator):
             ['V', 'PRESS', self.handle_paste, 'CTRL'],
         ]
 
-    def modal(self, context, event):
-        context.area.tag_redraw()
-        try:
-            return self.handle_input(event)
-        except QuitError:
-            self.on_quit()
-            return {'CANCELLED'}
-        except:
-            exc_type, exc_msg, exc_tb = sys.exc_info()
-            print("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
-
-    def invoke(self, context, event):
-        if context.area.type == 'VIEW_3D':
-            # init
-            self.init_handlers(context)
-            self.init_metadata()
-            self.init_modules()
-            self.init_root_obj()
-            return {'RUNNING_MODAL'}
-        else:
-            self.report({'WARNING'}, "View3D not found, cannot run operator")
-            return {'CANCELLED'}
-
     def init_handlers(self, context):
         # the arguments we pass the the callback
         args = (self, context)
@@ -268,12 +275,9 @@ class ModularBuildingTool(bpy.types.Operator):
         self._handle_2d = bpy.types.SpaceView3D.draw_handler_add(draw_callback_2d, args, 'WINDOW', 'POST_PIXEL')
         context.window_manager.modal_handler_add(self)
 
-    def init_metadata(self):
-        # todo hmm we need a tool panel, with 'metadata path' text input and browse button
-        #   and maybe select active root_obj
-        self.metadata_path = "C:/Program Files/Blender Foundation/Blender/2.78/scripts/addons/modular_building_tool_metadata.json"
-        # todo reload option
-        with open(self.metadata_path) as metadata_file:
+    def init_metadata(self, metadata_path):
+        # todo handle errors
+        with open(metadata_path) as metadata_file:
             self.metadata = json.load(metadata_file)
 
     def init_modules(self):
@@ -332,6 +336,9 @@ class ModularBuildingTool(bpy.types.Operator):
         kd.balance()
         return [childs[index] for pos, index, dist in kd.find_range(rel_pos, 0.5)]
 
+    def blender_report(self, level, msg):
+        raise NotImplementedError()
+
     def handle_quit(self):
         if self.grab:
             self.end_grab(cancel=True)
@@ -365,7 +372,7 @@ class ModularBuildingTool(bpy.types.Operator):
 
     def handle_cycle_module_group(self):
         if len(self.module_groups) <= 1:
-            self.report({'INFO'}, 'no more module groups to cycle to')
+            self.blender_report({'INFO'}, 'no more module groups to cycle to')
         else:
             self.active_group += 1
             self.active_group %= len(self.module_groups)
@@ -374,12 +381,12 @@ class ModularBuildingTool(bpy.types.Operator):
         act_g = self.get_active_group()
         if act_g is not None:
             if len(act_g.modules) <= 1:
-                self.report({'INFO'}, 'no more modules to cycle to')
+                self.blender_report({'INFO'}, 'no more modules to cycle to')
             else:
                 act_g.active += 1
                 act_g.active %= len(act_g.modules)
         else:
-            self.report({'INFO'}, 'no more modules to cycle to')
+            self.blender_report({'INFO'}, 'no more modules to cycle to')
 
     def handle_grab(self):
         if not self.grab:
@@ -393,7 +400,7 @@ class ModularBuildingTool(bpy.types.Operator):
         self.clipboard_rots.clear()
         for x in self.clipboard:
             self.clipboard_rots.append(x.rotation_euler.z)
-        self.report({'INFO'}, '({}) modules copied to clipboard'.format(len(self.clipboard)))
+        self.blender_report({'INFO'}, '({}) modules copied to clipboard'.format(len(self.clipboard)))
 
     def handle_paste(self):
         # paste
@@ -540,10 +547,11 @@ class ModularBuildingTool(bpy.types.Operator):
         self.cursor_paint()
 
     def smart_move(self, x, y):
+        mag = magnitude(x, y)
         # move in x or y, but only if already facing that direction
         rot = normalized_XY_to_Zrot(x, y)
         if self.cursor_rot == rot:
-            self.translate(0, 1, 0)
+            self.translate(0, int(mag), 0)
         else:
             self.rotate(rot - self.cursor_rot)
 
@@ -616,23 +624,48 @@ class ModularBuildingTool(bpy.types.Operator):
         if act_g is not None:
             return act_g.modules[act_g.active]
 
-def draw_callback_3d(self, context):
-    bgl.glDisable(bgl.GL_DEPTH_TEST)
+class ModularBuildingMode(ModularBuildingTool, Operator):
+    bl_idname = "view3d.modular_building_mode"
+    bl_label = "Modular Building Mode"
 
+    def modal(self, context, event):
+        context.area.tag_redraw()
+        try:
+            return self.handle_input(event)
+        except QuitError:
+            self.on_quit()
+            return {'CANCELLED'}
+        except:
+            exc_type, exc_msg, exc_tb = sys.exc_info()
+            print("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
+
+    def invoke(self, context, event):
+        settings = context.scene.mbt
+        if context.area.type == 'VIEW_3D':
+            # init
+            self.init_handlers(context)
+            # (reload every time invoked. too slow?)
+            self.init_metadata(settings.metadata_path)
+            self.init_modules()
+            self.init_root_obj()
+            return {'RUNNING_MODAL'}
+        else:
+            self.blender_report({'WARNING'}, "View3D not found, cannot run operator")
+            return {'CANCELLED'}
+
+    def blender_report(self, level, msg):
+        self.report(level, msg)
+
+def draw_callback_3d(self, context):
     mat_world = self.root_obj.matrix_world
     mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
     mat_trans = mathutils.Matrix.Translation(self.cursor_pos)
     mat = mat_trans * mat_rot
     mat = mat_world * mat
-
-    color = PURPLE
-    if self.grab:
-        color = GREEN
     t_arrow = mat_transform(mat, ARROW)
-
-    bgl.glBegin(bgl.GL_LINES)
-    draw_poly(t_arrow, color, 3)  # width doesn't work! :(
-    bgl.glEnd()
+    color = PURPLE if not self.grab else GREEN
+    bgl.glDisable(bgl.GL_DEPTH_TEST)
+    draw_poly(t_arrow, color)
 
     restore_gl_defaults()
 
@@ -659,11 +692,31 @@ def draw_callback_2d(self, context):
 
     restore_gl_defaults()
 
-def register():    
-    bpy.utils.register_class(ModularBuildingTool)
+class ConnectPortals(Operator):
+    # connect portals utility
+    bl_idname = "view3d.connect_portals"
+    bl_label = "Connect Portals"
+
+    @classmethod
+    def poll(self, context):
+        return len(context.selected_objects) == 2
+
+    def invoke(self, context, event):
+        obj1, obj2 = context.selected_objects
+        copy_location = obj1.constraints.new('COPY_LOCATION')
+        copy_rotation = obj1.constraints.new('COPY_ROTATION')
+        copy_location.target = obj2
+        copy_rotation.target = obj2
+        copy_rotation.use_offset = True
+        return {'PASS_THROUGH'}
+
+def register():
+    bpy.utils.register_module(__name__)
+    bpy.types.Scene.mbt = PointerProperty(type=ModularBuildingToolProperties)
 
 def unregister():
-    bpy.utils.unregister_class(ModularBuildingTool)
+    bpy.utils.unregister_module(__name__)
+    del bpy.types.Scene.mbt
 
 if __name__ == "__main__":
     register()
