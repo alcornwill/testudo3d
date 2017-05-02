@@ -58,8 +58,10 @@ class Vec2:
         self.y = y
 
 text_cursor = Vec2(0, 0)  # used for UI
+
 SEARCH_RANGE = 0.5
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
+#ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
 GREEN = (0.0, 1.0, 0.0, 1.0)
 BLUE = (0.0, 0.0, 1.0, 1.0)
@@ -67,7 +69,7 @@ WHITE = (1.0, 1.0, 1.0, 1.0)
 YELLOW = (1.0, 1.0, 0.0, 1.0)
 PURPLE = (1.0, 0.0, 1.0, 1.0)
 FONT_ID = 0  # hmm
-
+CUSTOM_PROPERTY_TYPE = "MBT_type"
 ADJACENCY_VECTORS = (
     Vector((1, 0, 0)),
     Vector((-1, 0, 0)),
@@ -91,7 +93,7 @@ def weighted_choice(choices):
         if upto + w >= r:
             return c
         upto += w
-    assert False, "Shouldn't get here"
+    # shouldn't get here
 
 def magnitude(x, y):
     return math.sqrt(x ** 2 + y ** 2)
@@ -152,11 +154,8 @@ def create_cube(position=None, rotz=None, scale=None):
         cube.scale = scale
     return cube
 
-def set_group_name(meshdata, value):
-    meshdata["MBT"] = value
-
 def get_group_name(meshdata):
-    return meshdata["MBT"]
+    return meshdata[CUSTOM_PROPERTY_TYPE]
 
 class Module:
     def __init__(self, data, name, group_name):
@@ -168,7 +167,7 @@ class ModuleGroup:
     def __init__(self, name, painter, thin=False):
         self.name = name
         self.painter = painter
-        self.active = 0
+        self.active = -1
         self.modules = []
         self.thin = thin
 
@@ -176,7 +175,12 @@ class ModuleGroup:
         self.painter.init(self)
 
     def active_module(self):
-        return self.modules[self.active]
+        if self.active >= 0:
+            return self.modules[self.active]
+
+    def add_module(self, module_):
+        self.active = 0
+        self.modules.append(module_)
 
 class RestoreCursorPos:
     # lets us edit the cursor pos and restore original value nicely
@@ -243,12 +247,19 @@ class Painter:
         self.mbt.clear()
 
     def draw_ui(self):
+        draw_text_2d(self.group.name, size=15)
         module_ = self.group.active_module()
-        draw_text_2d(module_.group_name, size=15)
-        draw_text_2d(module_.name)
+        if module_ is not None:
+            draw_text_2d(module_.name)
 
 class RoomPainter(Painter):
-    room_modes = ("Active Module", "Weighted Random", "Dither")
+    def __init__(self):
+        super().__init__()
+        self.room_modes = [
+            [self.active_module, "Active Module"],
+            [self.weighted_random, "Weighted Random"],
+            [self.dither, "Dither"]
+        ]
 
     def init(self, group):
         super().init(group)
@@ -267,27 +278,27 @@ class RoomPainter(Painter):
         self.mbt.clear()
         occupied = self.mbt.adjacent_occupied()
         original_rot = self.mbt.cursor_rot
-        #paint walls
-        if "wall" in self.mbt.weight_info:
-            for i in range(4):
-                if not occupied[i]:
-                    vec = ADJACENCY_VECTORS[i]
-                    self.mbt.cursor_rot = normalized_XY_to_Zrot(vec.x, vec.y)
-                    wall = self.room_get_module("wall")
-                    self.mbt.create_obj(wall)
-                else:
-                    # todo delete adjacent cell adjacent walls
-                    pass
-        #paint floor
-        if "floor" in self.mbt.weight_info:
-            if not occupied[5]:
-                floor = self.room_get_module("floor")
-                self.mbt.create_obj(floor)
-        #paint ceiling
-        if "ceiling" in self.mbt.weight_info:
-            if not occupied[4]:
-                floor = self.room_get_module("ceiling")
-                self.mbt.create_obj(floor)
+        # paint walls
+        for i in range(4):
+            if not occupied[i]:
+                vec = ADJACENCY_VECTORS[i]
+                self.mbt.cursor_rot = normalized_XY_to_Zrot(vec.x, vec.y)
+                wall = self.room_get_module("wall")
+                if wall is not None:
+                    self.mbt.create_obj(wall.data)
+            else:
+                # todo delete adjacent cell adjacent walls
+                pass
+        # paint floor
+        if not occupied[5]:
+            floor = self.room_get_module("floor")
+            if floor is not None:
+                self.mbt.create_obj(floor.data)
+        # paint ceiling
+        if not occupied[4]:
+            ceiling = self.room_get_module("ceiling")
+            if ceiling is not None:
+                self.mbt.create_obj(ceiling.data)
         self.mbt.cursor_rot = original_rot
 
     def repaint_adjacent(self):
@@ -301,22 +312,27 @@ class RoomPainter(Painter):
 
     def room_get_module(self, type_):
         # todo define custom room modes with metadata
-        if self.mbt.module_groups["room"].active == 0:
-            # active module
-            return self.mbt.module_groups[type_].active_module().data
-        elif self.group.active == 1:
-            # weighted random
+        mode_func, mode_name = self.room_modes[self.group.active]
+        return mode_func(type_)
+
+    def active_module(self, type_):
+        return self.mbt.module_groups[type_].active_module()
+
+    def weighted_random(self, type_):
+        if type_ in self.mbt.weight_info:
             return weighted_choice(self.mbt.weight_info[type_])
-        elif self.group.active == 2:
-            # dither
-            # (does this work when pos negative?)
+
+    def dither(self, type_):
+        group = self.mbt.module_groups[type_]
+        if len(group.modules) > 0:
             idx = int(self.mbt.cursor_pos.x + self.mbt.cursor_pos.y + self.mbt.cursor_pos.z)
-            idx %= len(self.mbt.weight_info[type_])
-            return self.mbt.weight_info[type_][idx][0]
+            idx %= len(group.modules)
+            return group.modules[idx]
 
     def draw_ui(self):
         draw_text_2d("room", size=15, color=YELLOW)
-        draw_text_2d(self.room_modes[self.group.active], size=20, color=YELLOW)
+        mode_func, mode_name = self.room_modes[self.group.active]
+        draw_text_2d(mode_name, size=20, color=YELLOW)
 
 class ModuleFinder:
     mbt = None
@@ -373,38 +389,49 @@ class ModularBuildingTool:
             self.metadata = json.load(metadata_file)
 
     def init_module_groups(self):
-        #initialize modules list
-        self.module_groups['wall']=ModuleGroup('wall', Painter(), thin=True)
-        self.module_groups['floor']=ModuleGroup('floor', Painter())
-        #self.module_groups.append(ModuleGroup('ceiling'))
+        # initialize modules list
+        # NOTE: would need to override this function if adding custom painter
+        self.module_groups['wall'] = ModuleGroup('wall', Painter(), thin=True)
+        self.module_groups['floor'] = ModuleGroup('floor', Painter())
+        self.module_groups['ceiling'] = ModuleGroup('ceiling', Painter())
         self.module_groups['room'] = ModuleGroup("room", RoomPainter())
 
+    def add_module_group(self, group):
+        self.module_groups[group.name] = group
+
+    def add_module(self, module_):
+        self.modules[module_.name] = module_
+
     def init_modules(self):
-        for m_name, value in self.metadata.items():
-            try:
-                mesh = bpy.data.meshes[m_name]
-            except KeyError:
-                print('WARNING: mesh "{}" not found'.format(m_name))
+        for mesh in bpy.data.meshes:
+            # get type from custom property
+            if CUSTOM_PROPERTY_TYPE not in mesh:
                 continue
-            if mesh is None:
-                print('WARNING: mesh "{}" not found'.format(m_name))
-                continue
-            g_name = value["type"]
+            g_name = get_group_name(mesh)
             try:
                 group = self.module_groups[g_name]
             except KeyError:
                 # create
-                group = ModuleGroup(g_name, Painter())  # todo properties?
-                self.module_groups[g_name] = group
-            module_ = Module(mesh, m_name, g_name)
-            self.modules[m_name] = module_
-            group.modules.append(module_)
-            set_group_name(mesh, g_name)
-            weight = get_key(value, 'weight', 1.0)
+                group = ModuleGroup(g_name, Painter())  # todo custom_groups properties
+                self.add_module_group(group)
+            module_ = Module(mesh, mesh.name, g_name)
+            self.add_module(module_)
+            group.add_module(module_)
+
+    def init_weights(self):
+        # used for generators
+        metadata_weights = self.metadata["weights"]
+        for mesh_name, weight in metadata_weights.items():
             try:
-                self.weight_info[g_name].append((mesh, weight))  # used for room paint
+                mesh = self.modules[mesh_name]
             except KeyError:
-                self.weight_info[g_name] = []
+                print('WARNING: invalid weight. mesh not found "{}"'.format(mesh_name))
+                continue
+            g_name = mesh.group_name
+            try:
+                self.weight_info[g_name].append((mesh, weight))
+            except KeyError:
+                self.weight_info[g_name] = [(mesh, weight)]
 
     def init_root_obj(self):
         self.root_obj = bpy.context.object
@@ -604,29 +631,38 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         except:
             exc_type, exc_msg, exc_tb = sys.exc_info()
             print("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
+            self.on_quit()
             return {'CANCELLED'}
 
     def invoke(self, context, event):
         settings = context.scene.mbt
         if context.area.type == 'VIEW_3D':
             # init
-            try:
-                self.init_metadata(settings.metadata_path)
-            except FileNotFoundError:
-                self.blender_report({'ERROR'}, 'metadata file not found {}'.format(settings.metadata_path))
-                return {'CANCELLED'}
-            except json.decoder.JSONDecodeError as error:
-                self.blender_report({'ERROR'}, 'invalid json {}'.format(settings.metadata_path))
-                print(error)
-                return {'CANCELLED'}
+            use_metadata = settings.metadata_path != ""
+            if use_metadata:
+                try:
+                    self.init_metadata(settings.metadata_path)
+                except FileNotFoundError:
+                    # self.report({'ERROR'}, 'metadata file not found {}'.format(settings.metadata_path))
+                    # return {'CANCELLED'}
+                    print("ERROR metadata file not found {}".format(settings.metadata_path))
+                except json.decoder.JSONDecodeError as error:
+                    # self.report({'ERROR'}, 'invalid json {}'.format(settings.metadata_path))
+                    # return {'CANCELLED'}
+                    print('ERROR invalid json {}'.format(settings.metadata_path))
+                    print(error)
 
             self.init_module_groups()
+            self.init_modules()
 
-            try:
-                self.init_modules()
-            except (KeyError, ValueError, AttributeError):
-                self.report({'ERROR'}, 'metadata format error {}'.format(settings.metadata_path))
-                return {'CANCELLED'}
+            if use_metadata:
+                try:
+                    self.init_weights()
+                except (KeyError, ValueError, AttributeError) as error:
+                    # self.report({'ERROR'}, 'metadata format error {}'.format(settings.metadata_path))
+                    # return {'CANCELLED'}
+                    print('ERROR metadata format error {}'.format(settings.metadata_path))
+                    print(error)
 
             self.init_root_obj()
             self.init_handlers(context)

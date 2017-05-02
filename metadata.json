@@ -1,18 +1,19 @@
 {
-    "Wall1": {
-        "type": "wall",
-        "weight": 1.0
+    "weights": {
+        "Wall1": 1.0,
+        "Wall2": 0.5,
+        "Floor1": 1.0
     },
-    "Wall2": {
-        "type": "wall",
-        "weight": 0.5
+    "custom_rooms": {
+        "Room 1": {
+            "floor": "Floor1",
+            "wall": "Wall1",
+            "ceiling": "Ceiling1"
+        }
     },
-    "Floor1": {
-        "type": "floor",
-        "weight": 1.0
-    },
-    "Floor2": {
-        "type": "floor",
-        "weight": 0.1
+    "custom_groups": {
+        "example": {
+            "thin": true
+        }
     }
 }

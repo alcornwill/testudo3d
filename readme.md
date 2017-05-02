@@ -46,14 +46,20 @@ can be anything, but some have special meaning
 * __weight__: 'room' paint has a 'weighted random' mode, which uses this value  
  
 #### controls
-* cursor keys move the 3d cursor arrow
-* ENTER paints a module at the cursor position
-* SHIFT UP/DOWN move up and down
-* TAB cycle the module
-* SHIFT TAB cycle the module group
-* (G to grab. still buggy)
+* __cursor keys__ move the 3d cursor arrow
+* __ENTER__ paints a module
+* __CTRL UP/DOWN__ move up and down
+* __TAB__ cycle the module
+* __SHIFT TAB__ cycle the module group
+* __X__ delete
+* __CTRL C/V__ copy/paste
+* (__G__ to grab. still buggy)
 # usage advanced
-once you exit the tool, you can move the root object and rotate it. scaling is not recommended  
+once you exit the tool, you can move the root object and rotate it. scaling is not recommended
+#### more controls
+* __SHIFT cursor keys__ move faster
+* __CTRL LEFT/RIGHT__ strafe
+* __SHIFT X__ clear
 #### constraints
 you can go even further with modularity by joining together rooms with constraints    
 __Connect Portals__ is another feature of MBT to make this easier  
