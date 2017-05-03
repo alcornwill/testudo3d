@@ -65,9 +65,11 @@ ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
 GREEN = (0.0, 1.0, 0.0, 1.0)
 BLUE = (0.0, 0.0, 1.0, 1.0)
+CYAN = (0.0, 1.0, 1.0, 1.0)
 WHITE = (1.0, 1.0, 1.0, 1.0)
 YELLOW = (1.0, 1.0, 0.0, 1.0)
 PURPLE = (1.0, 0.0, 1.0, 1.0)
+GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
 CUSTOM_PROPERTY_TYPE = "MBT_type"
 ADJACENCY_VECTORS = (
@@ -84,6 +86,9 @@ def get_key(dict_, key, default=None):
         return dict_[key]
     except KeyError:
         return default
+
+def mid(a, b, c) :
+    return min(max(a,b),max(b,c),max(a,c))
 
 def weighted_choice(choices):
     total = sum(w for c, w in choices)
@@ -132,10 +137,10 @@ def mat_transform(mat, poly):
 
 def draw_text_2d(text, size=20, color=WHITE):
     bgl.glColor4f(*color)
+    text_cursor.y -= size + 3 # behaves like command line
     blf.position(FONT_ID, text_cursor.x, text_cursor.y, 0)
     blf.size(FONT_ID, size, 72)
     blf.draw(FONT_ID, text)
-    text_cursor.y -= size + 5  # behaves like command line
 
 def restore_gl_defaults():
     # restore opengl defaults
@@ -194,13 +199,6 @@ class RestoreCursorPos:
     def __exit__(self, exc_type, exc_value, traceback):
         self.mbt.cursor_pos = self.original_pos
 
-def update_module_type_property(self, context):
-    mbt = context.scene.mbt
-    active_object = context.active_object
-    if active_object is not None:
-        data = active_object.data
-        data[CUSTOM_PROPERTY_TYPE] = mbt.mesh_panel_module_type
-
 class ModularBuildingToolProperties(PropertyGroup):
     metadata_path = StringProperty(
         name = "Metadata Path",
@@ -208,10 +206,16 @@ class ModularBuildingToolProperties(PropertyGroup):
         subtype = "FILE_PATH"
       )
 
-    mesh_panel_module_type = StringProperty(
+    module_library_path = StringProperty(
+        name = "Module Library Path",
+        description = "Path to your module library .blend file",
+        subtype = "FILE_PATH"
+      )
+
+    module_type = StringProperty(
         name = "Module Type",
-        description = "module type: 'floor', 'wall' or 'ceiling'",
-        update=update_module_type_property)
+        description = "module type: 'floor', 'wall' or 'ceiling'"
+    )
 
 class ModularBuildingToolPanel(Panel):
     bl_idname = "view3d.modular_building_tool_panel"
@@ -226,7 +230,28 @@ class ModularBuildingToolPanel(Panel):
         mbt = context.scene.mbt
 
         layout.prop(mbt, 'metadata_path', text="")
+        row = layout.row(align=True)
+        sub = row.row()
+        sub.scale_x = 3.0
+        sub.prop(mbt, 'module_library_path', text="")
+        row.operator(LinkAllMesh.bl_idname)
         layout.operator(ModularBuildingMode.bl_idname)
+        self.display_selected_module_type(context)
+        row = layout.row(align=True)
+        sub = row.row()
+        sub.scale_x = 3.0
+        sub.prop(mbt, 'module_type')
+        row.operator(SetModuleTypeOperator.bl_idname)
+
+    def display_selected_module_type(self, context):
+        active_object = context.active_object
+        if active_object is not None:
+            data = active_object.data
+            if data is not None:
+                current_type = None
+                if CUSTOM_PROPERTY_TYPE in data:
+                    current_type = data[CUSTOM_PROPERTY_TYPE]
+                self.layout.label("Selected Module Type: {}".format(current_type))
 
 class Painter:
     mbt = None
@@ -259,10 +284,10 @@ class Painter:
         self.mbt.clear()
 
     def draw_ui(self):
-        draw_text_2d(self.group.name, size=15)
         module_ = self.group.active_module()
         if module_ is not None:
-            draw_text_2d(module_.name)
+            draw_text_2d(module_.name, size=15)
+        draw_text_2d(self.group.name, size=25)
 
 class RoomPainter(Painter):
     instance = None  # singleton
@@ -353,9 +378,9 @@ class RoomPainter(Painter):
         self.room_modes.append((lambda type_: self.custom_room(custom_room, type_), name))
 
     def draw_ui(self):
-        draw_text_2d("room", size=15, color=YELLOW)
         mode_func, mode_name = self.room_modes[self.group.active]
-        draw_text_2d(mode_name, size=20, color=YELLOW)
+        draw_text_2d(mode_name, size=15, color=YELLOW)
+        draw_text_2d("room", size=25, color=YELLOW)
 
 class ModuleFinder:
     mbt = None
@@ -414,10 +439,10 @@ class ModularBuildingTool:
     def init_module_groups(self):
         # initialize modules list
         # NOTE: would need to override this function if adding custom painter
+        self.module_groups['room'] = ModuleGroup("room", RoomPainter())
         self.module_groups['wall'] = ModuleGroup('wall', Painter(), thin=True)
         self.module_groups['floor'] = ModuleGroup('floor', Painter())
         self.module_groups['ceiling'] = ModuleGroup('ceiling', Painter())
-        self.module_groups['room'] = ModuleGroup("room", RoomPainter())
 
     def add_module_group(self, group):
         self.module_groups[group.name] = group
@@ -590,6 +615,9 @@ class ModularBuildingTool:
         self.on_paint(obj)
         return obj
 
+    def set_active_group(self, i):
+        self.active_group = mid(0, i, len(self.module_groups) - 1)
+
     def get_active_group(self):
         if len(self.module_groups) > 0:
             return list(self.module_groups.values())[self.active_group]
@@ -630,8 +658,8 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             ['X', 'PRESS', self.handle_clear, 'SHIFT'],
             ['X', 'PRESS', self.handle_delete, None],
             ['X', 'RELEASE', self.handle_delete_end, None],
-            ['TAB', 'PRESS', self.handle_cycle_module_group, 'CTRL'],
-            ['TAB', 'PRESS', self.handle_cycle_module, None],
+            ['TAB', 'PRESS', lambda: self.handle_cycle_module(-1), 'CTRL'],
+            ['TAB', 'PRESS', lambda: self.handle_cycle_module(1), None],
             ['G', 'PRESS', self.handle_grab, None],
             ['LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), 'CTRL'],
             ['RIGHT_ARROW', 'PRESS', lambda: self.translate(1, 0, 0), 'CTRL'],
@@ -647,6 +675,16 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             ['DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1), None],
             ['C', 'PRESS', self.handle_copy, 'CTRL'],
             ['V', 'PRESS', self.paste, 'CTRL'],
+            ['ONE', 'PRESS', lambda: self.set_active_group(0), None],
+            ['TWO', 'PRESS', lambda: self.set_active_group(1), None],
+            ['THREE', 'PRESS', lambda: self.set_active_group(2), None],
+            ['FOUR', 'PRESS', lambda: self.set_active_group(3), None],
+            ['FIVE', 'PRESS', lambda: self.set_active_group(4), None],
+            ['SIX', 'PRESS', lambda: self.set_active_group(5), None],
+            ['SEVEN', 'PRESS', lambda: self.set_active_group(6), None],
+            ['EIGHT', 'PRESS', lambda: self.set_active_group(7), None],
+            ['NINE', 'PRESS', lambda: self.set_active_group(8), None],
+            ['ZERO', 'PRESS', lambda: self.set_active_group(9), None]
         ]
 
     def modal(self, context, event):
@@ -748,13 +786,13 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             self.active_group += 1
             self.active_group %= len(self.module_groups)
 
-    def handle_cycle_module(self):
+    def handle_cycle_module(self, i):
         act_g = self.get_active_group()
         if act_g is not None:
-            if len(act_g.modules) <= 1:
+            if len(act_g.modules) <= i:
                 self.report({'INFO'}, 'no more modules to cycle to')
             else:
-                act_g.active += 1
+                act_g.active += i
                 act_g.active %= len(act_g.modules)
         else:
             self.report({'INFO'}, 'no more modules to cycle to')
@@ -796,7 +834,7 @@ def draw_callback_3d(self, context):
 def draw_callback_2d(self, context):
     # draw text
     text_cursor.x = 20
-    text_cursor.y = 130
+    text_cursor.y = 140
 
     group = self.get_active_group()
     if group is not None:
@@ -806,28 +844,26 @@ def draw_callback_2d(self, context):
 
     # info
     vec3_str = "{}, {}, {}".format(int(self.cursor_pos.x), int(self.cursor_pos.y), int(self.cursor_pos.z))
-    draw_text_2d("cursor pos: " + vec3_str, size=15, color=WHITE)
+    draw_text_2d("cursor pos: " + vec3_str, size=15, color=GREY)
 
     restore_gl_defaults()
 
-class MBTMeshPanel(Panel):
-    bl_idname = "DATA_PT_modular_building_tool"
-    bl_label = "MBT"
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = "data"
+class SetModuleTypeOperator(Operator):
+    bl_idname = "view3d.set_module_type"
+    bl_label = "Set Module Type"
 
-    def draw(self, context):
+    @classmethod
+    def poll(self, context):
+        return context.object is not None
+
+    def execute(self, context):
         mbt = context.scene.mbt
-        active_object = context.active_object
-        if active_object is not None:
-            data = active_object.data
+        selected = context.selected_objects
+        for obj in selected:
+            data = obj.data
             if data is not None:
-                current_type = None
-                if CUSTOM_PROPERTY_TYPE in data:
-                    current_type = data[CUSTOM_PROPERTY_TYPE]
-                self.layout.label("Current Type: {}".format(current_type))
-        self.layout.prop(mbt, "mesh_panel_module_type")
+                data[CUSTOM_PROPERTY_TYPE] = mbt.module_type
+        return {'FINISHED'}
 
 class ConnectPortals(Operator):
     # connect portals utility
@@ -845,6 +881,19 @@ class ConnectPortals(Operator):
         copy_location.target = obj2
         copy_rotation.target = obj2
         copy_rotation.use_offset = True
+        return {'FINISHED'}
+
+class LinkAllMesh(Operator):
+    bl_idname = "view3d.link_all_mesh"
+    bl_label = "Link"
+
+    def execute(self, context):
+        mbt = context.scene.mbt
+        print(mbt.module_library_path)
+        with bpy.data.libraries.load(mbt.module_library_path, link=True) as (data_src, data_dst):
+            data_dst.meshes = data_src.meshes
+            self.report({'INFO'}, 'linked {} meshes'.format(len(data_src.meshes)))
+
         return {'FINISHED'}
 
 def register():

@@ -2,12 +2,12 @@
 (todo youtube video)  
 create modular scenes, a common technique in game development
 ## features
-* 'paint' with modules in 3D
-* keyboard controls  
+* __'paint' with modules in 3D__
+* __keyboard controls__  
 (mouse could be supported in the future) 
-* organise modules into groups
-* 'room' generator
-* (more generators maybe in the future)
+* __organise modules into groups__
+* __'room' generator__  
+(more generators maybe in the future)
 ## modules
 modules should be 1x1x1 or smaller  
 multi-cell modules may be supported in the future
@@ -24,13 +24,15 @@ there are 3 paint modes:
 * __Active Module__: use the active module of each module group
 * __Weighted Random__: uses weights defined in metadata
 * __Dither__: dither between the first two modules in the group  
-(could be useful for windows)
+(could be useful for windows) 
+
+you can also add custom rooms with the metadata json (see example)
 # usage
 MBT uses the mesh data in your blend file to build with    
 ## setup
 * assign a __module type__ to meshes you want to use as modules  
-Properties > Data > MBT > Module Type  
-this will assign a custom property to the mesh data  
+3D View > MBT > Set Module Type  
+this will assign a custom property to the mesh data of selected objects  
 (object transformation doesn't matter, only the mesh data is used)
 * you can work with the modules like this, but you probably want to save this .blend file and use as a __module library__.
 Work in a new .blend file and link your module library (file > link)
@@ -44,8 +46,8 @@ Work in a new .blend file and link your module library (file > link)
 * __cursor keys__ move the 3d cursor arrow
 * __ENTER__ paints a module
 * __CTRL UP/DOWN__ move up and down
-* __TAB__ cycle the module
-* __SHIFT TAB__ cycle the module group
+* __TAB / SHIFT TAB__ cycle the module
+* __1-9__ set active module group
 * __X__ delete
 * __CTRL C/V__ copy/paste
 * (__G__ to grab. still buggy)
