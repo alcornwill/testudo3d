@@ -194,12 +194,24 @@ class RestoreCursorPos:
     def __exit__(self, exc_type, exc_value, traceback):
         self.mbt.cursor_pos = self.original_pos
 
+def update_module_type_property(self, context):
+    mbt = context.scene.mbt
+    active_object = context.active_object
+    if active_object is not None:
+        data = active_object.data
+        data[CUSTOM_PROPERTY_TYPE] = mbt.mesh_panel_module_type
+
 class ModularBuildingToolProperties(PropertyGroup):
     metadata_path = StringProperty(
         name = "Metadata Path",
         description = "Path to metadata json file",
         subtype = "FILE_PATH"
       )
+
+    mesh_panel_module_type = StringProperty(
+        name = "Module Type",
+        description = "module type: 'floor', 'wall' or 'ceiling'",
+        update=update_module_type_property)
 
 class ModularBuildingToolPanel(Panel):
     bl_idname = "view3d.modular_building_tool_panel"
@@ -253,12 +265,16 @@ class Painter:
             draw_text_2d(module_.name)
 
 class RoomPainter(Painter):
+    instance = None  # singleton
+
     def __init__(self):
         super().__init__()
+        RoomPainter.instance = self
+        self.custom_rooms = {}
         self.room_modes = [
-            [self.active_module, "Active Module"],
-            [self.weighted_random, "Weighted Random"],
-            [self.dither, "Dither"]
+            (self.active_module, "Active Module"),
+            (self.weighted_random, "Weighted Random"),
+            (self.dither, "Dither")
         ]
 
     def init(self, group):
@@ -267,12 +283,11 @@ class RoomPainter(Painter):
 
     def paint(self):
         self.room_paint()
-        # repaint adjacent cells (could be optimized to just delete walls, which is all it does for now, but that might change in the future anyway)
         self.repaint_adjacent()
 
     def delete(self):
         self.mbt.clear()
-        self.mbt.repaint_adjacent()
+        self.repaint_adjacent()
 
     def room_paint(self):
         self.mbt.clear()
@@ -286,9 +301,6 @@ class RoomPainter(Painter):
                 wall = self.room_get_module("wall")
                 if wall is not None:
                     self.mbt.create_obj(wall.data)
-            else:
-                # todo delete adjacent cell adjacent walls
-                pass
         # paint floor
         if not occupied[5]:
             floor = self.room_get_module("floor")
@@ -304,9 +316,9 @@ class RoomPainter(Painter):
     def repaint_adjacent(self):
         with RestoreCursorPos(self.mbt):
             orig_curs_pos = self.mbt.cursor_pos
-            occupied = self.mbt.adjacent_occupied()
-            for i, vec in enumerate(ADJACENCY_VECTORS):
-                if occupied[i]:
+            adjacent_occupied = self.mbt.adjacent_occupied()
+            for occupied, vec in zip(adjacent_occupied, ADJACENCY_VECTORS):
+                if occupied:
                     self.mbt.cursor_pos = orig_curs_pos + vec
                     self.room_paint()
 
@@ -328,6 +340,17 @@ class RoomPainter(Painter):
             idx = int(self.mbt.cursor_pos.x + self.mbt.cursor_pos.y + self.mbt.cursor_pos.z)
             idx %= len(group.modules)
             return group.modules[idx]
+
+    def custom_room(self, custom_room, type_):
+        module_name = custom_room[type_]
+        return self.mbt.modules[module_name]
+
+    @staticmethod
+    def add_custom_room(name, custom_room):
+        self = RoomPainter.instance
+        self.group.modules.append(None)
+        self.custom_rooms[name] = custom_room
+        self.room_modes.append((lambda type_: self.custom_room(custom_room, type_), name))
 
     def draw_ui(self):
         draw_text_2d("room", size=15, color=YELLOW)
@@ -432,6 +455,11 @@ class ModularBuildingTool:
                 self.weight_info[g_name].append((mesh, weight))
             except KeyError:
                 self.weight_info[g_name] = [(mesh, weight)]
+
+    def init_custom_rooms(self):
+        metadata_custom_rooms = self.metadata["custom_rooms"]
+        for name, value in metadata_custom_rooms.items():
+            RoomPainter.add_custom_room(name, value)
 
     def init_root_obj(self):
         self.root_obj = bpy.context.object
@@ -658,6 +686,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             if use_metadata:
                 try:
                     self.init_weights()
+                    self.init_custom_rooms()
                 except (KeyError, ValueError, AttributeError) as error:
                     # self.report({'ERROR'}, 'metadata format error {}'.format(settings.metadata_path))
                     # return {'CANCELLED'}
@@ -780,6 +809,25 @@ def draw_callback_2d(self, context):
     draw_text_2d("cursor pos: " + vec3_str, size=15, color=WHITE)
 
     restore_gl_defaults()
+
+class MBTMeshPanel(Panel):
+    bl_idname = "DATA_PT_modular_building_tool"
+    bl_label = "MBT"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "data"
+
+    def draw(self, context):
+        mbt = context.scene.mbt
+        active_object = context.active_object
+        if active_object is not None:
+            data = active_object.data
+            if data is not None:
+                current_type = None
+                if CUSTOM_PROPERTY_TYPE in data:
+                    current_type = data[CUSTOM_PROPERTY_TYPE]
+                self.layout.label("Current Type: {}".format(current_type))
+        self.layout.prop(mbt, "mesh_panel_module_type")
 
 class ConnectPortals(Operator):
     # connect portals utility
