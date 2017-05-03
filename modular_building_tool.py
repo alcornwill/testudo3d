@@ -36,9 +36,9 @@ import json
 import mathutils
 import math
 import random
-#noinspection PyUnresolvedReferences
+# noinspection PyUnresolvedReferences
 from mathutils import Vector
-#noinspection PyUnresolvedReferences
+# noinspection PyUnresolvedReferences
 from bpy.props import (StringProperty,
                        BoolProperty,
                        IntProperty,
@@ -46,7 +46,7 @@ from bpy.props import (StringProperty,
                        EnumProperty,
                        PointerProperty,
                        )
-#noinspection PyUnresolvedReferences
+# noinspection PyUnresolvedReferences
 from bpy.types import (Panel,
                        Operator,
                        PropertyGroup,
@@ -61,7 +61,7 @@ text_cursor = Vec2(0, 0)  # used for UI
 
 SEARCH_RANGE = 0.5
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
-#ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
+# ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
 GREEN = (0.0, 1.0, 0.0, 1.0)
 BLUE = (0.0, 0.0, 1.0, 1.0)
@@ -87,8 +87,8 @@ def get_key(dict_, key, default=None):
     except KeyError:
         return default
 
-def mid(a, b, c) :
-    return min(max(a,b),max(b,c),max(a,c))
+def mid(a, b, c):
+    return min(max(a, b), max(b, c), max(a, c))
 
 def weighted_choice(choices):
     total = sum(w for c, w in choices)
@@ -125,6 +125,13 @@ def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
     bgl.glVertex3f(*end)
 
+def draw_wire(edges, color=WHITE):
+    bgl.glBegin(bgl.GL_LINES)
+    bgl.glColor4f(*color)
+    for start, end in edges:
+        draw_line_3d(start, end)
+    bgl.glEnd()
+
 def draw_poly(poly, color):
     bgl.glBegin(bgl.GL_POLYGON)
     bgl.glColor4f(*color)
@@ -135,9 +142,12 @@ def draw_poly(poly, color):
 def mat_transform(mat, poly):
     return [mat * v for v in poly]
 
+def mat_transform_edges(mat, edges):
+    return [(mat * start, mat * end) for start, end in edges]
+
 def draw_text_2d(text, size=20, color=WHITE):
     bgl.glColor4f(*color)
-    text_cursor.y -= size + 3 # behaves like command line
+    text_cursor.y -= size + 3  # behaves like command line
     blf.position(FONT_ID, text_cursor.x, text_cursor.y, 0)
     blf.size(FONT_ID, size, 72)
     blf.draw(FONT_ID, text)
@@ -152,9 +162,9 @@ def create_cube(position=None, rotz=None, scale=None):
     bpy.ops.mesh.primitive_cube_add()
     cube = bpy.context.scene.objects.active
     if position is not None:
-        cube.location=position
+        cube.location = position
     if rotz is not None:
-        cube.rotation_euler = mathutils.Euler((0,0,math.radians(rotz)))
+        cube.rotation_euler = mathutils.Euler((0, 0, math.radians(rotz)))
     if scale is not None:
         cube.scale = scale
     return cube
@@ -162,12 +172,39 @@ def create_cube(position=None, rotz=None, scale=None):
 def get_group_name(meshdata):
     return meshdata[CUSTOM_PROPERTY_TYPE]
 
+def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
+    a = Vector((x_min, y_min, z_min))
+    b = Vector((x_max, y_min, z_min))
+    c = Vector((x_max, y_max, z_min))
+    d = Vector((x_min, y_max, z_min))
+    e = Vector((x_min, y_min, z_max))
+    f = Vector((x_max, y_min, z_max))
+    g = Vector((x_max, y_max, z_max))
+    h = Vector((x_min, y_max, z_max))
+
+    return [
+        (a, b),
+        (b, c),
+        (c, d),
+        (d, a),
+
+        (e, f),
+        (f, g),
+        (g, h),
+        (h, e),
+
+        (a, e),
+        (b, f),
+        (c, g),
+        (d, h)
+    ]
+
 class Module:
     def __init__(self, data, name, group_name):
         self.data = data
         self.name = name
         self.group_name = group_name
-        
+
 class ModuleGroup:
     def __init__(self, name, painter, thin=False):
         self.name = name
@@ -201,20 +238,20 @@ class RestoreCursorPos:
 
 class ModularBuildingToolProperties(PropertyGroup):
     metadata_path = StringProperty(
-        name = "Metadata Path",
-        description = "Path to metadata json file",
-        subtype = "FILE_PATH"
-      )
+        name="Metadata Path",
+        description="Path to metadata json file",
+        subtype="FILE_PATH"
+    )
 
     module_library_path = StringProperty(
-        name = "Module Library Path",
-        description = "Path to your module library .blend file",
-        subtype = "FILE_PATH"
-      )
+        name="Module Library Path",
+        description="Path to your module library .blend file",
+        subtype="FILE_PATH"
+    )
 
     module_type = StringProperty(
-        name = "Module Type",
-        description = "module type: 'floor', 'wall' or 'ceiling'"
+        name="Module Type",
+        description="module type: 'floor', 'wall' or 'ceiling'"
     )
 
 class ModularBuildingToolPanel(Panel):
@@ -409,6 +446,7 @@ class ModularBuildingModeState:
     clear = False
     delete = False
     grab = False
+    select = False
 
 class ModularBuildingTool:
     def __init__(self):
@@ -422,6 +460,8 @@ class ModularBuildingTool:
         # self.cursor_tilt = 0  # may be useful for slopes (like rollarcoaster tycoon)
         self.cursor_rot = 0
         self.state = ModularBuildingModeState()
+        self.select_start_pos = None
+        self.select_cube = None
         self.grabbed = []
         # used to restore the properties of modules when a grab operation is canceled
         self.original_pos = Vector()
@@ -521,6 +561,7 @@ class ModularBuildingTool:
             group.painter.delete()
         elif self.state.clear:
             group.painter.clear()
+        self.construct_select_cube()
 
     def rotate(self, rot):
         # rotate the cursor and paint
@@ -572,7 +613,7 @@ class ModularBuildingTool:
                 if g.thin:
                     # only delete if x has same rotation as m (rounded to nearest ordinal direction...)
                     if int(round(math.degrees(x.rotation_euler[2]))) != rot:
-                        continue # don't delete existing
+                        continue  # don't delete existing
                 # delete existing module
                 to_delete.append(x)
                 break  # should only be one
@@ -591,7 +632,7 @@ class ModularBuildingTool:
         rot = self.cursor_rot
         if cancel:
             pos = self.original_pos
-            #rot = self.original_rot  # todo this is why it is broken?
+            # rot = self.original_rot  # todo this is why it is broken?
             for x in range(len(self.grabbed)):
                 # reset transform of grabbed
                 o = self.grabbed[x]
@@ -639,11 +680,42 @@ class ModularBuildingTool:
             new = self.create_obj(o.data)
             new.rotation_euler.z = self.clipboard_rots[x]
 
+    def start_select(self):
+        self.state.select = True
+        self.select_start_pos = self.cursor_pos
+        self.construct_select_cube()
+
+    def end_select(self):
+        orig_cursor_pos = self.cursor_pos
+        cube_min, cube_max = self.select_cube_bounds()
+        for z in range(int(abs(cube_max.z + 1 - cube_min.z))):
+            for y in range(int(abs(cube_max.y + 1 - cube_min.y))):
+                for x in range(int(abs(cube_max.x + 1 - cube_min.x))):
+                    self.cursor_pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
+                    self.paint()
+        self.cursor_pos = orig_cursor_pos
+        self.state.select = False
+
+    def construct_select_cube(self):
+        if self.state.select:
+            cube_min, cube_max = self.select_cube_bounds()
+            self.select_cube = construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
+                                                    cube_min.y - 0.5, cube_max.y + 0.5,
+                                                    cube_min.z, cube_max.z + 1.0)
+
+    def select_cube_bounds(self):
+        start = self.select_start_pos
+        end = self.cursor_pos
+        cube_min = Vector((min(start.x, end.x), min(start.y, end.y), min(start.z, end.z)))
+        cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
+        return cube_min, cube_max
+
 class QuitError(Exception):
     # not an error lol
     pass
 
 class ModularBuildingMode(ModularBuildingTool, Operator):
+    """Modal operator for constructing modular scenes"""
     bl_idname = "view3d.modular_building_mode"
     bl_label = "Modular Building Mode"
 
@@ -675,6 +747,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             ['DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1), None],
             ['C', 'PRESS', self.handle_copy, 'CTRL'],
             ['V', 'PRESS', self.paste, 'CTRL'],
+            ['B', 'PRESS', self.handle_select, None],
             ['ONE', 'PRESS', lambda: self.set_active_group(0), None],
             ['TWO', 'PRESS', lambda: self.set_active_group(1), None],
             ['THREE', 'PRESS', lambda: self.set_active_group(2), None],
@@ -758,6 +831,10 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         if self.state.grab:
             # behaves same as space
             self.end_grab()
+        elif self.state.select:
+            self.state.paint = True
+            self.end_select()
+            self.state.paint = False
         elif not self.state.paint:
             self.state.paint = True
             self.paint()
@@ -766,12 +843,20 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         self.state.paint = False
 
     def handle_delete(self):
-        if not self.state.grab and not self.state.delete:
+        if self.state.select:
+            self.state.delete = True
+            self.end_select()
+            self.state.delete = False
+        elif not self.state.grab and not self.state.delete:
             self.state.delete = True
             self.paint()
 
     def handle_clear(self):
-        if not self.state.grab and not self.state.clear:
+        if self.state.select:
+            self.state.clear = True
+            self.end_select()
+            self.state.clear = False
+        elif not self.state.grab and not self.state.clear:
             self.state.clear = True
             self.paint()
 
@@ -807,6 +892,13 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         self.copy()
         self.report({'INFO'}, '({}) modules copied to clipboard'.format(len(self.clipboard)))
 
+    def handle_select(self):
+        if not self.state.select:
+            self.start_select()
+        else:
+            # cancel
+            self.state.select = False
+
     def handle_input(self, event):
         for type_, value, func, modifier in self.input_map:
             if modifier == 'SHIFT' and not event.shift or \
@@ -820,10 +912,18 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
 
 def draw_callback_3d(self, context):
     mat_world = self.root_obj.matrix_world
+
+    mat = mat_world
+
+    if self.state.select:
+        t_cube = mat_transform_edges(mat, self.select_cube)
+        draw_wire(t_cube, YELLOW)
+
     mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
     mat_trans = mathutils.Matrix.Translation(self.cursor_pos)
     mat = mat_trans * mat_rot
     mat = mat_world * mat
+
     t_arrow = mat_transform(mat, ARROW)
     color = PURPLE if not self.state.grab else GREEN
     bgl.glDisable(bgl.GL_DEPTH_TEST)
@@ -849,6 +949,7 @@ def draw_callback_2d(self, context):
     restore_gl_defaults()
 
 class SetModuleTypeOperator(Operator):
+    """Set module type of selected objects"""
     bl_idname = "view3d.set_module_type"
     bl_label = "Set Module Type"
 
@@ -866,6 +967,7 @@ class SetModuleTypeOperator(Operator):
         return {'FINISHED'}
 
 class ConnectPortals(Operator):
+    """Connect two objects with constraints utility"""
     # connect portals utility
     bl_idname = "view3d.connect_portals"
     bl_label = "Connect Portals"
@@ -884,6 +986,7 @@ class ConnectPortals(Operator):
         return {'FINISHED'}
 
 class LinkAllMesh(Operator):
+    """Link all meshes from module library"""
     bl_idname = "view3d.link_all_mesh"
     bl_label = "Link"
 
