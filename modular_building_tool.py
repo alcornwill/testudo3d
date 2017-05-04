@@ -121,6 +121,11 @@ def normalized_XY_to_Zrot(x, y):
     rad = math.atan2(-x, y)
     return math.degrees(rad)
 
+def rot_conv(rot):
+    # convert blender object rot to format easily compared
+    # it would be better if we compared the angle between two rotations
+    return int(round(math.degrees(rot))) % 360
+
 def update_3dviews():
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:
@@ -296,17 +301,21 @@ class ModularBuildingToolPanel(Panel):
 
         layout.prop(mbt, 'metadata_path', text="")
         row = layout.row(align=True)
-        sub = row.row()
+        sub = row.row(align=True)
         sub.scale_x = 3.0
         sub.prop(mbt, 'module_library_path', text="")
         row.operator(LinkAllMesh.bl_idname)
-        layout.operator(ModularBuildingMode.bl_idname)
+        row = layout.row()
+        row.operator(ModularBuildingMode.bl_idname)
+        row.enabled = not ModularBuildingMode.running_modal
         self.display_selected_module_type(context)
         row = layout.row(align=True)
-        sub = row.row()
+        sub = row.row(align=True)
         sub.scale_x = 3.0
         sub.prop(mbt, 'module_type')
         row.operator(SetModuleTypeOperator.bl_idname)
+        layout.separator()
+        layout.operator(ConnectObjects.bl_idname)
 
     def display_selected_module_type(self, context):
         active_object = context.active_object
@@ -346,7 +355,7 @@ class Painter:
         if self.group.thin:
             # only delete if facing same as cursor rot
             for m in match:
-                if int(m.rotation_euler.z) == self.mbt.cursor_rot:
+                if round(math.degrees(m.rotation_euler.z)) == self.mbt.cursor_rot:
                     delete_object(m)
                     break
         else:
@@ -471,9 +480,7 @@ class ModuleFinder:
         self.kd.balance()
 
     def get_modules_at(self, pos):
-        # get objects near pos, relative to root_obj
-        rel_pos = self.mbt.root_obj.matrix_world.inverted() * pos
-        return [self.childs[index] for pos, index, dist in self.kd.find_range(rel_pos, SEARCH_RANGE)]
+        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
 
 class ModularBuildingModeState:
     # hmm, should be in ModularBuildingMode?
@@ -508,6 +515,30 @@ class ModularBuildingTool:
         logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
         Painter.mbt = self
         ModuleFinder.mbt = self
+
+    def init(self, metadata_path):
+        use_metadata = metadata_path != ""
+        if use_metadata:
+            try:
+                self.init_metadata(metadata_path)
+            except FileNotFoundError:
+                self.error("metadata file not found {}".format(metadata_path))
+                use_metadata = False
+            except json.decoder.JSONDecodeError as error:
+                self.error('invalid json {}'.format(metadata_path))
+                print(error)
+                use_metadata = False
+        self.init_module_groups()
+        self.init_modules()
+        if use_metadata:
+            try:
+                self.init_weights()
+                self.init_custom_rooms()
+                self.init_custom_groups()
+            except (KeyError, ValueError, AttributeError) as error:
+                self.error('metadata format error {}'.format(metadata_path))
+                print(error)
+        self.init_root_obj()
 
     def init_metadata(self, metadata_path):
         if metadata_path.startswith('//'):
@@ -587,6 +618,9 @@ class ModularBuildingTool:
             self.root_obj = bpy.context.scene.objects.active
         logging.debug("initialized root obj")
 
+    def error(self, msg):
+        logging.error(msg)
+
     def add_module_group(self, group):
         self.module_groups[group.name] = group
 
@@ -658,7 +692,7 @@ class ModularBuildingTool:
         rot = normalized_XY_to_Zrot(x, y)
         if self.cursor_rot == rot:
             for i in range(repeat):
-                self.translate(0, int(mag), 0)
+                self.translate(0, round(mag), 0)
         else:
             self.rotate(rot - self.cursor_rot)
 
@@ -667,18 +701,19 @@ class ModularBuildingTool:
 
     def on_paint_at(self, pos, rot, module_):
         # call this when creating or moving a module. it replaces overlapping modules
+        # 'blend' would be better name? combines src with dst
         to_delete = []
         g_to = get_group_name(module_.data)
         finder = ModuleFinder()
-        mod_list = finder.get_modules_at(pos)
-        for x in mod_list:
+        dest_modules = finder.get_modules_at(pos)
+        for x in dest_modules:
             g_from = get_group_name(x.data)
             if g_to == g_from and x != module_:
                 # module is already occupied with module of same group, may have to delete
                 g = self.module_groups[g_to]
                 if g.thin:
                     # only delete if x has same rotation as m (rounded to nearest ordinal direction...)
-                    if int(round(math.degrees(x.rotation_euler[2]))) != rot:
+                    if rot_conv(x.rotation_euler.z) != rot:
                         continue  # don't delete existing
                 # delete existing module
                 to_delete.append(x)
@@ -696,19 +731,18 @@ class ModularBuildingTool:
     def end_grab(self, cancel=False):
         logging.debug("end grab")
         self.state.grab = False
-        pos = self.cursor_pos
-        rot = self.cursor_rot
         if cancel:
-            pos = self.original_pos
-            # rot = self.original_rot  # todo this is why it is broken?
             for x in range(len(self.grabbed)):
                 # reset transform of grabbed
                 o = self.grabbed[x]
                 rot = self.original_rots[x]
                 o.location = self.original_pos
                 o.rotation_euler.z = rot
-        for g in self.grabbed:
-            self.on_paint_at(pos, rot, g)
+        else:
+            # combine with modules at destination
+            pos = self.cursor_pos  # assume objs are at cursor pos (invalid if was multi-cell grab)
+            for g in self.grabbed:
+                self.on_paint_at(pos, rot_conv(g.rotation_euler.z), g)
         self.grabbed.clear()
         self.original_rots.clear()
 
@@ -724,8 +758,6 @@ class ModularBuildingTool:
         logging.debug("created object {}".format(data.name))
         self.on_paint(obj)
         return obj
-
-    # todo need human api to set active group and module by name
 
     def set_active_group(self, i):
         self.active_group = mid(0, i, len(self.module_groups) - 1)
@@ -765,9 +797,9 @@ class ModularBuildingTool:
         logging.debug("end box select")
         orig_cursor_pos = self.cursor_pos
         cube_min, cube_max = self.select_cube_bounds()
-        for z in range(int(abs(cube_max.z + 1 - cube_min.z))):
-            for y in range(int(abs(cube_max.y + 1 - cube_min.y))):
-                for x in range(int(abs(cube_max.x + 1 - cube_min.x))):
+        for z in range(int(round(abs(cube_max.z + 1 - cube_min.z)))):
+            for y in range(int(round(abs(cube_max.y + 1 - cube_min.y)))):
+                for x in range(int(round(abs(cube_max.x + 1 - cube_min.x)))):
                     self.cursor_pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
                     self.cdraw()
         self.cursor_pos = orig_cursor_pos
@@ -801,6 +833,8 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
     """Modal operator for constructing modular scenes"""
     bl_idname = "view3d.modular_building_mode"
     bl_label = "Modular Building Mode"
+
+    running_modal = False
 
     def __init__(self):
         super().__init__()
@@ -857,34 +891,12 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             return {'CANCELLED'}
 
     def invoke(self, context, event):
+        if ModularBuildingMode.running_modal: return {'CANCELLED'}
+        ModularBuildingMode.running_modal = True
         settings = context.scene.mbt
         if context.area.type == 'VIEW_3D':
             # init
-            use_metadata = settings.metadata_path != ""
-            if use_metadata:
-                try:
-                    self.init_metadata(settings.metadata_path)
-                except FileNotFoundError:
-                    self.error("metadata file not found {}".format(settings.metadata_path))
-                    use_metadata = False
-                except json.decoder.JSONDecodeError as error:
-                    self.error('invalid json {}'.format(settings.metadata_path))
-                    print(error)
-                    use_metadata = False
-
-            self.init_module_groups()
-            self.init_modules()
-
-            if use_metadata:
-                try:
-                    self.init_weights()
-                    self.init_custom_rooms()
-                    self.init_custom_groups()
-                except (KeyError, ValueError, AttributeError) as error:
-                    self.error('metadata format error {}'.format(settings.metadata_path))
-                    print(error)
-
-            self.init_root_obj()
+            self.init(settings.metadata_path)
             self.init_handlers(context)
             return {'RUNNING_MODAL'}
         else:
@@ -892,8 +904,8 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             return {'CANCELLED'}
 
     def error(self, msg):
+        super().error(msg)
         self.report({'ERROR'}, msg)
-        logging.error(msg)
 
     def init_handlers(self, context):
         args = (self, context)  # the arguments we pass the the callback
@@ -904,6 +916,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
     def on_quit(self):
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
+        ModularBuildingMode.running_modal = False
 
     def handle_quit(self):
         if self.state.grab:
@@ -1050,22 +1063,23 @@ class SetModuleTypeOperator(Operator):
                 data[CUSTOM_PROPERTY_TYPE] = mbt.module_type
         return {'FINISHED'}
 
-class ConnectPortals(Operator):
+class ConnectObjects(Operator):
     """Connect two objects with constraints utility"""
-    # connect portals utility
-    bl_idname = "view3d.connect_portals"
-    bl_label = "Connect Portals"
+    bl_idname = "view3d.connect_objects"
+    bl_label = "Connect Objects"
 
     @classmethod
     def poll(self, context):
-        return len(context.selected_objects) == 2
+        return context.mode == "OBJECT" and len(context.selected_objects) == 2
 
     def execute(self, context):
-        obj1, obj2 = context.selected_objects
+        #obj1, obj2 = context.selected_objects
+        obj1, obj2 = bpy.selection
         copy_location = obj1.constraints.new('COPY_LOCATION')
         copy_rotation = obj1.constraints.new('COPY_ROTATION')
         copy_location.target = obj2
         copy_rotation.target = obj2
+        copy_location.use_offset = True
         copy_rotation.use_offset = True
         return {'FINISHED'}
 
@@ -1081,6 +1095,39 @@ class LinkAllMesh(Operator):
             self.report({'INFO'}, 'linked {} meshes'.format(len(data_src.meshes)))
 
         return {'FINISHED'}
+
+#executes selection by order at 3d view
+class Selection(bpy.types.Header):
+    bl_label = "Selection"
+    bl_space_type = "VIEW_3D"
+
+    def __init__(self):
+        self.select()
+
+    # lol
+    def draw(self, context):
+        pass
+
+    @staticmethod
+    def select():
+        # context.selected_objects doesn't respect selection order, so we have to do this...
+        selected = bpy.context.selected_objects
+        n = len(selected)
+
+        if n == 0:
+            bpy.selection=[]
+        else:
+            if n == 1:
+                bpy.selection=[]
+                bpy.selection.append(selected[0])
+            elif n > len(bpy.selection):
+                for obj in selected:
+                    if obj not in bpy.selection:
+                        bpy.selection.append(obj)
+            elif n < len(bpy.selection):
+                for obj in bpy.selection:
+                    if obj not in selected:
+                        bpy.selection.remove(obj)
 
 def register():
     bpy.utils.register_module(__name__)

@@ -6,6 +6,7 @@ import sys
 tests = {}
 mbt = None
 RESULTS_DIR = "results"
+# NOTE: requires blender in PATH
 COMMAND ='blender --background debug.blend --python test_script.py -- --test {}'
 
 def draw_pixel(x, y):
@@ -63,16 +64,7 @@ class MbtTest:
         import modular_building_tool
         global mbt
         mbt = modular_building_tool.ModularBuildingTool(logging_level=logging.DEBUG)
-        use_metadata = self.metadata_path is not None
-        if use_metadata:
-            mbt.init_metadata(self.metadata_path)
-        mbt.init_module_groups()
-        mbt.init_modules()
-        if use_metadata:
-            mbt.init_weights()
-            mbt.init_custom_rooms()
-            mbt.init_custom_groups()
-        mbt.init_root_obj()
+        mbt.init(self.metadata_path)
 
     def logic(self):
         raise NotImplementedError()
@@ -109,16 +101,19 @@ class CombinedTest(MbtTest):
     metadata_path = "metadata.json"
 
     def logic(self):
+        # for each module and module group, test features
         for i in range(len(mbt.module_groups)):
             mbt.active_group = i
             group = mbt.get_active_group()
             for j in range(len(group.modules)):
                 group.active = j
 
+                # paint
                 mbt.translate(0, 1, 0)
                 mbt.paint()
                 mbt.translate(0, -1, 0)
 
+                # grab
                 mbt.translate(2, 0, 0)
                 mbt.paint()
                 mbt.start_grab()
@@ -128,6 +123,7 @@ class CombinedTest(MbtTest):
                 mbt.rotate(-90)
                 mbt.translate(0, -2, 0)
 
+                # copy
                 mbt.translate(2, 0, 0)
                 mbt.paint()
                 mbt.copy()
@@ -136,15 +132,18 @@ class CombinedTest(MbtTest):
                 mbt.paste()
                 mbt.translate(0, -2, 0)
 
+                # box select fill
                 mbt.translate(2, 0, 0)
                 mbt.start_select()
                 mbt.translate(0, 1, 0)
                 mbt.fill()
                 mbt.translate(0, -1, 0)
 
+                # reset
                 mbt.cursor_pos.x = 0
                 mbt.translate(0, 0, 4)
 
+            # reset
             mbt.cursor_pos.x = 0
             mbt.cursor_pos.z = 0
             mbt.translate(0, -4, 0)
