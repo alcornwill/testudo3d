@@ -28,11 +28,14 @@ bl_info = {
     "category": "3D View",
 }
 
+import os
 import sys
 import bpy
 import bgl
 import blf
 import json
+import logging
+import collections
 import mathutils
 import math
 import random
@@ -72,6 +75,9 @@ PURPLE = (1.0, 0.0, 1.0, 1.0)
 GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
 CUSTOM_PROPERTY_TYPE = "MBT_type"
+METADATA_WEIGHTS = "weights"
+METADATA_CUSTOM_ROOMS = "custom_rooms"
+METADATA_CUSTOM_GROUPS = "custom_groups"
 ADJACENCY_VECTORS = (
     Vector((1, 0, 0)),
     Vector((-1, 0, 0)),
@@ -169,6 +175,19 @@ def create_cube(position=None, rotz=None, scale=None):
         cube.scale = scale
     return cube
 
+def delete_object(obj):
+    bpy.data.objects.remove(obj, True)
+    logging.debug("deleted 1 object")
+    update_3dviews()
+
+def delete_objects(objects):
+    # use this when you can, saves calling update_3dview
+    if len(objects) == 0: return
+    for m in objects:
+        bpy.data.objects.remove(m, True)
+    logging.debug("deleted {} objects".format(len(objects)))
+    update_3dviews()
+
 def get_group_name(meshdata):
     return meshdata[CUSTOM_PROPERTY_TYPE]
 
@@ -205,6 +224,11 @@ class Module:
         self.name = name
         self.group_name = group_name
 
+        log_created(self)
+
+    def __str__(self):
+        return "{} {}".format(type(self).__name__, self.name)
+
 class ModuleGroup:
     def __init__(self, name, painter, thin=False):
         self.name = name
@@ -215,6 +239,10 @@ class ModuleGroup:
 
         # init
         self.painter.init(self)
+        log_created(self)
+
+    def __str__(self):
+        return "{} {}".format(type(self).__name__, self.name)
 
     def active_module(self):
         if self.active >= 0:
@@ -290,14 +318,22 @@ class ModularBuildingToolPanel(Panel):
                     current_type = data[CUSTOM_PROPERTY_TYPE]
                 self.layout.label("Selected Module Type: {}".format(current_type))
 
+def log_created(obj):
+    logging.debug("created {}".format(str(obj)))
+
 class Painter:
     mbt = None
 
     def __init__(self):
         self.group = None
 
+    def __str__(self):
+        group_name = self.group.name if self.group else '""'
+        return "{} for {}".format(type(self).__name__, group_name)
+
     def init(self, group):
         self.group = group
+        log_created(self)
 
     def paint(self):
         module_ = self.group.active_module()
@@ -311,11 +347,11 @@ class Painter:
             # only delete if facing same as cursor rot
             for m in match:
                 if int(m.rotation_euler.z) == self.mbt.cursor_rot:
-                    self.mbt.delete_module(m)
+                    delete_object(m)
                     break
         else:
             if len(match) > 0:
-                self.mbt.delete_module(match[0])  # should only be one
+                delete_object(match[0])  # should only be one
 
     def clear(self):
         self.mbt.clear()
@@ -385,7 +421,6 @@ class RoomPainter(Painter):
                     self.room_paint()
 
     def room_get_module(self, type_):
-        # todo define custom room modes with metadata
         mode_func, mode_name = self.room_modes[self.group.active]
         return mode_func(type_)
 
@@ -449,11 +484,11 @@ class ModularBuildingModeState:
     select = False
 
 class ModularBuildingTool:
-    def __init__(self):
+    def __init__(self, logging_level=logging.INFO):
         self.weight_info = {}
         self.metadata = None
         self.root_obj = None
-        self.module_groups = {}
+        self.module_groups = collections.OrderedDict()
         self.active_group = 0
         self.modules = {}
         self.cursor_pos = Vector((0, 0, 0))
@@ -469,12 +504,18 @@ class ModularBuildingTool:
         self.clipboard = []
         self.clipboard_rots = []
 
+        # init
+        logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
         Painter.mbt = self
         ModuleFinder.mbt = self
 
     def init_metadata(self, metadata_path):
+        if metadata_path.startswith('//'):
+            metadata_path = metadata_path[2:]  # not sure if this is always right
+        metadata_path = os.path.abspath(metadata_path)
         with open(metadata_path) as metadata_file:
             self.metadata = json.load(metadata_file)
+        logging.debug("initialized metadata")
 
     def init_module_groups(self):
         # initialize modules list
@@ -483,6 +524,68 @@ class ModularBuildingTool:
         self.module_groups['wall'] = ModuleGroup('wall', Painter(), thin=True)
         self.module_groups['floor'] = ModuleGroup('floor', Painter())
         self.module_groups['ceiling'] = ModuleGroup('ceiling', Painter())
+        logging.debug("initialized module groups")
+
+    def init_modules(self):
+        for mesh in bpy.data.meshes:
+            # get type from custom property
+            if CUSTOM_PROPERTY_TYPE not in mesh:
+                continue
+            group_name = get_group_name(mesh)
+            try:
+                group = self.module_groups[group_name]
+            except KeyError:
+                # create
+                group = ModuleGroup(group_name, Painter())
+                self.add_module_group(group)
+            module_ = Module(mesh, mesh.name, group_name)
+            self.add_module(module_)
+            group.add_module(module_)
+        logging.debug("initilized modules")
+
+    def init_weights(self):
+        # used for generators
+        if METADATA_WEIGHTS not in self.metadata: return
+        metadata_weights = self.metadata[METADATA_WEIGHTS]
+        for mesh_name, weight in metadata_weights.items():
+            try:
+                mesh = self.modules[mesh_name]
+            except KeyError:
+                logging.warning('invalid weight. mesh not found "{}"'.format(mesh_name))
+                continue
+            g_name = mesh.group_name
+            try:
+                self.weight_info[g_name].append((mesh, weight))
+            except KeyError:
+                self.weight_info[g_name] = [(mesh, weight)]
+        logging.debug("initialized weights")
+
+    def init_custom_rooms(self):
+        if METADATA_CUSTOM_ROOMS not in self.metadata: return
+        metadata_custom_rooms = self.metadata[METADATA_CUSTOM_ROOMS]
+        for name, value in metadata_custom_rooms.items():
+            RoomPainter.add_custom_room(name, value)
+        logging.debug("initialized custom rooms")
+
+    def init_custom_groups(self):
+        custom_groups = {}
+        if METADATA_CUSTOM_GROUPS in self.metadata:
+            custom_groups = self.metadata[METADATA_CUSTOM_GROUPS]
+        for name, group_prop in custom_groups.items():
+            if name not in self.module_groups:
+                logging.warning("custom groups: {} not a module group".format(name))
+                continue
+            thin = get_key(group_prop, 'thin', False)
+            group = self.module_groups[name]
+            group.thin = thin
+        logging.debug("initialized custom groups")
+
+    def init_root_obj(self):
+        self.root_obj = bpy.context.object
+        if self.root_obj is None:
+            bpy.ops.object.empty_add()
+            self.root_obj = bpy.context.scene.objects.active
+        logging.debug("initialized root obj")
 
     def add_module_group(self, group):
         self.module_groups[group.name] = group
@@ -490,70 +593,30 @@ class ModularBuildingTool:
     def add_module(self, module_):
         self.modules[module_.name] = module_
 
-    def init_modules(self):
-        for mesh in bpy.data.meshes:
-            # get type from custom property
-            if CUSTOM_PROPERTY_TYPE not in mesh:
-                continue
-            g_name = get_group_name(mesh)
-            try:
-                group = self.module_groups[g_name]
-            except KeyError:
-                # create
-                group = ModuleGroup(g_name, Painter())  # todo custom_groups properties
-                self.add_module_group(group)
-            module_ = Module(mesh, mesh.name, g_name)
-            self.add_module(module_)
-            group.add_module(module_)
-
-    def init_weights(self):
-        # used for generators
-        metadata_weights = self.metadata["weights"]
-        for mesh_name, weight in metadata_weights.items():
-            try:
-                mesh = self.modules[mesh_name]
-            except KeyError:
-                print('WARNING: invalid weight. mesh not found "{}"'.format(mesh_name))
-                continue
-            g_name = mesh.group_name
-            try:
-                self.weight_info[g_name].append((mesh, weight))
-            except KeyError:
-                self.weight_info[g_name] = [(mesh, weight)]
-
-    def init_custom_rooms(self):
-        metadata_custom_rooms = self.metadata["custom_rooms"]
-        for name, value in metadata_custom_rooms.items():
-            RoomPainter.add_custom_room(name, value)
-
-    def init_root_obj(self):
-        self.root_obj = bpy.context.object
-        if self.root_obj is None:
-            bpy.ops.object.empty_add()
-            self.root_obj = bpy.context.scene.objects.active
-
     def get_modules(self):
         finder = ModuleFinder()
         return finder.get_modules_at(self.cursor_pos)
 
+    def delete(self):
+        # human API
+        self.state.delete = True
+        self.cdraw()
+        self.state.delete = False
+
+    def paint(self):
+        # human API
+        self.state.paint = True
+        self.cdraw()
+        self.state.paint = False
+
     def clear(self):
-        self.delete_modules(self.get_modules())
-
-    def delete_module(self, m):
-        bpy.data.objects.remove(m, True)
-        update_3dviews()
-
-    def delete_modules(self, modules_):
-        # use this when you can, saves calling update_3dview
-        for m in modules_:
-            bpy.data.objects.remove(m, True)
-        update_3dviews()
+        delete_objects(self.get_modules())
 
     def adjacent_occupied(self):
         finder = ModuleFinder()
         return [len(finder.get_modules_at(self.cursor_pos + vec)) > 0 for vec in ADJACENCY_VECTORS]
 
-    def paint(self):
+    def cdraw(self):
         group = self.get_active_group()
         if self.state.paint:
             group.painter.paint()
@@ -566,25 +629,28 @@ class ModularBuildingTool:
     def rotate(self, rot):
         # rotate the cursor and paint
         self.cursor_rot = self.cursor_rot + rot
+        logging.debug("rotated cursor {}".format(rot))
         for x in self.grabbed:
             x.rotation_euler[2] = x.rotation_euler[2] + math.radians(rot)
-        self.paint()
+        self.cdraw()
 
     def translate(self, x, y, z):
         # translate the cursor and paint
         translation = Vector((x, y, z))
+        logging.debug("moved cursor {}".format(translation))
         mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
-
         translation = mat_rot * translation
         self.cursor_pos = self.cursor_pos + translation
-        # round cursor_pos to nearest integer
-        self.cursor_pos.x = round(self.cursor_pos.x)
-        self.cursor_pos.y = round(self.cursor_pos.y)
-        self.cursor_pos.z = round(self.cursor_pos.z)
+        self.round_vector(self.cursor_pos)
         if self.state.grab:
             for x in self.grabbed:
                 x.location = x.location + translation
-        self.paint()
+        self.cdraw()
+
+    def round_vector(self, vec):
+        vec.x = round(vec.x)
+        vec.y = round(vec.y)
+        vec.z = round(vec.z)
 
     def smart_move(self, x, y, repeat=1):
         # move in x or y, but only if already facing that direction
@@ -617,9 +683,10 @@ class ModularBuildingTool:
                 # delete existing module
                 to_delete.append(x)
                 break  # should only be one
-        self.delete_modules(to_delete)
+        delete_objects(to_delete)
 
     def start_grab(self):
+        logging.debug("start grab")
         self.state.grab = True
         self.grabbed = self.get_modules()
         self.original_pos = self.cursor_pos
@@ -627,6 +694,7 @@ class ModularBuildingTool:
             self.original_rots.append(x.rotation_euler.z)
 
     def end_grab(self, cancel=False):
+        logging.debug("end grab")
         self.state.grab = False
         pos = self.cursor_pos
         rot = self.cursor_rot
@@ -653,15 +721,19 @@ class ModularBuildingTool:
         obj.name = data.name
         bpy.data.meshes.remove(cube, True)  # clean up the cube mesh data
         obj.parent = self.root_obj
+        logging.debug("created object {}".format(data.name))
         self.on_paint(obj)
         return obj
+
+    # todo need human api to set active group and module by name
 
     def set_active_group(self, i):
         self.active_group = mid(0, i, len(self.module_groups) - 1)
 
     def get_active_group(self):
         if len(self.module_groups) > 0:
-            return list(self.module_groups.values())[self.active_group]
+            values = list(self.module_groups.values())
+            return values[self.active_group]
 
     def get_active_module(self):
         act_g = self.get_active_group()
@@ -669,30 +741,35 @@ class ModularBuildingTool:
             return act_g.modules[act_g.active]
 
     def copy(self):
-        self.clipboard = self.get_modules()
+        modules = self.get_modules()
+        self.clipboard = [obj.data for obj in modules]
         self.clipboard_rots.clear()
-        for x in self.clipboard:
+        for x in modules:
             self.clipboard_rots.append(x.rotation_euler.z)
+        logging.debug("copied {} objects to clipboard".format(len(self.clipboard)))
 
     def paste(self):
         for x in range(len(self.clipboard)):
-            o = self.clipboard[x]
-            new = self.create_obj(o.data)
+            data = self.clipboard[x]
+            new = self.create_obj(data)
             new.rotation_euler.z = self.clipboard_rots[x]
+        logging.debug("pasted {} objects".format(len(self.clipboard)))
 
     def start_select(self):
+        logging.debug("start box select")
         self.state.select = True
         self.select_start_pos = self.cursor_pos
         self.construct_select_cube()
 
     def end_select(self):
+        logging.debug("end box select")
         orig_cursor_pos = self.cursor_pos
         cube_min, cube_max = self.select_cube_bounds()
         for z in range(int(abs(cube_max.z + 1 - cube_min.z))):
             for y in range(int(abs(cube_max.y + 1 - cube_min.y))):
                 for x in range(int(abs(cube_max.x + 1 - cube_min.x))):
                     self.cursor_pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
-                    self.paint()
+                    self.cdraw()
         self.cursor_pos = orig_cursor_pos
         self.state.select = False
 
@@ -709,6 +786,12 @@ class ModularBuildingTool:
         cube_min = Vector((min(start.x, end.x), min(start.y, end.y), min(start.z, end.z)))
         cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
         return cube_min, cube_max
+
+    def fill(self):
+        # human API
+        self.state.paint = True
+        self.end_select()
+        self.state.paint = False
 
 class QuitError(Exception):
     # not an error lol
@@ -769,7 +852,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             return {'CANCELLED'}
         except:
             exc_type, exc_msg, exc_tb = sys.exc_info()
-            print("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
+            self.error("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
             self.on_quit()
             return {'CANCELLED'}
 
@@ -782,14 +865,12 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
                 try:
                     self.init_metadata(settings.metadata_path)
                 except FileNotFoundError:
-                    # self.report({'ERROR'}, 'metadata file not found {}'.format(settings.metadata_path))
-                    # return {'CANCELLED'}
-                    print("ERROR metadata file not found {}".format(settings.metadata_path))
+                    self.error("metadata file not found {}".format(settings.metadata_path))
+                    use_metadata = False
                 except json.decoder.JSONDecodeError as error:
-                    # self.report({'ERROR'}, 'invalid json {}'.format(settings.metadata_path))
-                    # return {'CANCELLED'}
-                    print('ERROR invalid json {}'.format(settings.metadata_path))
+                    self.error('invalid json {}'.format(settings.metadata_path))
                     print(error)
+                    use_metadata = False
 
             self.init_module_groups()
             self.init_modules()
@@ -798,10 +879,9 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
                 try:
                     self.init_weights()
                     self.init_custom_rooms()
+                    self.init_custom_groups()
                 except (KeyError, ValueError, AttributeError) as error:
-                    # self.report({'ERROR'}, 'metadata format error {}'.format(settings.metadata_path))
-                    # return {'CANCELLED'}
-                    print('ERROR metadata format error {}'.format(settings.metadata_path))
+                    self.error('metadata format error {}'.format(settings.metadata_path))
                     print(error)
 
             self.init_root_obj()
@@ -810,6 +890,10 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         else:
             self.report({'WARNING'}, "View3D not found, cannot run operator")
             return {'CANCELLED'}
+
+    def error(self, msg):
+        self.report({'ERROR'}, msg)
+        logging.error(msg)
 
     def init_handlers(self, context):
         args = (self, context)  # the arguments we pass the the callback
@@ -837,7 +921,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             self.state.paint = False
         elif not self.state.paint:
             self.state.paint = True
-            self.paint()
+            self.cdraw()
 
     def handle_paint_end(self):
         self.state.paint = False
@@ -849,7 +933,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             self.state.delete = False
         elif not self.state.grab and not self.state.delete:
             self.state.delete = True
-            self.paint()
+            self.cdraw()
 
     def handle_clear(self):
         if self.state.select:
@@ -858,7 +942,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             self.state.clear = False
         elif not self.state.grab and not self.state.clear:
             self.state.clear = True
-            self.paint()
+            self.cdraw()
 
     def handle_delete_end(self):
         self.state.delete = False
@@ -992,7 +1076,6 @@ class LinkAllMesh(Operator):
 
     def execute(self, context):
         mbt = context.scene.mbt
-        print(mbt.module_library_path)
         with bpy.data.libraries.load(mbt.module_library_path, link=True) as (data_src, data_dst):
             data_dst.meshes = data_src.meshes
             self.report({'INFO'}, 'linked {} meshes'.format(len(data_src.meshes)))
