@@ -40,7 +40,7 @@ import mathutils
 import math
 import random
 # noinspection PyUnresolvedReferences
-from mathutils import Vector
+from mathutils import Vector, Quaternion, Euler
 # noinspection PyUnresolvedReferences
 from bpy.props import (StringProperty,
                        BoolProperty,
@@ -53,7 +53,7 @@ from bpy.props import (StringProperty,
 from bpy.types import (Panel,
                        Operator,
                        PropertyGroup,
-                       )
+                       Header)
 
 class Vec2:
     def __init__(self, x, y):
@@ -121,9 +121,15 @@ def normalized_XY_to_Zrot(x, y):
     rad = math.atan2(-x, y)
     return math.degrees(rad)
 
+def normalized_XY_to_Zrot_rad(x, y):
+    x, y = normalize(x, y)
+    return math.atan2(-x, y)
+
 def rot_conv(rot):
     # convert blender object rot to format easily compared
     # it would be better if we compared the angle between two rotations
+    # todo found it https://docs.blender.org/api/blender_python_api_2_70_release/mathutils.html
+    # quaternion .rotation_difference()
     return int(round(math.degrees(rot))) % 360
 
 def update_3dviews():
@@ -223,6 +229,19 @@ def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
         (d, h)
     ]
 
+
+class QuitError(Exception):
+    # not an error lol
+    pass
+
+class KeyInput:
+    def __init__(self, type_, value, func, ctrl=False, shift=False):
+        self.type = type_
+        self.value = value
+        self.func = func
+        self.ctrl = ctrl
+        self.shift = shift
+
 class Module:
     def __init__(self, data, name, group_name):
         self.data = data
@@ -306,8 +325,8 @@ class ModularBuildingToolPanel(Panel):
         sub.prop(mbt, 'module_library_path', text="")
         row.operator(LinkAllMesh.bl_idname)
         row = layout.row()
-        row.operator(ModularBuildingMode.bl_idname)
-        row.enabled = not ModularBuildingMode.running_modal
+        layout.operator(ModularBuildingMode.bl_idname)
+        layout.operator(SetActiveModule.bl_idname)
         self.display_selected_module_type(context)
         row = layout.row(align=True)
         sub = row.row(align=True)
@@ -390,7 +409,7 @@ class RoomPainter(Painter):
 
     def paint(self):
         self.room_paint()
-        self.repaint_adjacent()
+        self.repaint_adjacent()  # this is why it is so slow todo paint(width, height)
 
     def delete(self):
         self.mbt.clear()
@@ -483,7 +502,6 @@ class ModuleFinder:
         return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
 
 class ModularBuildingModeState:
-    # hmm, should be in ModularBuildingMode?
     paint = False
     clear = False
     delete = False
@@ -491,6 +509,8 @@ class ModularBuildingModeState:
     select = False
 
 class ModularBuildingTool:
+    instance = None
+
     def __init__(self, logging_level=logging.INFO):
         self.weight_info = {}
         self.metadata = None
@@ -512,6 +532,7 @@ class ModularBuildingTool:
         self.clipboard_rots = []
 
         # init
+        ModularBuildingTool.instance = self
         logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
         Painter.mbt = self
         ModuleFinder.mbt = self
@@ -539,6 +560,7 @@ class ModularBuildingTool:
                 self.error('metadata format error {}'.format(metadata_path))
                 print(error)
         self.init_root_obj()
+        self.construct_select_cube()
 
     def init_metadata(self, metadata_path):
         if metadata_path.startswith('//'):
@@ -621,6 +643,17 @@ class ModularBuildingTool:
     def error(self, msg):
         logging.error(msg)
 
+    def set_active_group_name(self, name):
+        if name not in self.module_groups: return
+        keys = list(self.module_groups.keys())
+        self.active_group = keys.index(name)
+
+    def set_active_module_name(self, name):
+        group = self.get_active_group()
+        for i, module_ in enumerate(group.modules):
+            if module_.name == name:
+                group.active = i
+
     def add_module_group(self, group):
         self.module_groups[group.name] = group
 
@@ -630,6 +663,19 @@ class ModularBuildingTool:
     def get_modules(self):
         finder = ModuleFinder()
         return finder.get_modules_at(self.cursor_pos)
+
+    def set_active_group(self, i):
+        self.active_group = mid(0, i, len(self.module_groups) - 1)
+
+    def get_active_group(self):
+        if len(self.module_groups) > 0:
+            values = list(self.module_groups.values())
+            return values[self.active_group]
+
+    def get_active_module(self):
+        act_g = self.get_active_group()
+        if act_g is not None:
+            return act_g.modules[act_g.active]
 
     def delete(self):
         # human API
@@ -676,9 +722,8 @@ class ModularBuildingTool:
         translation = mat_rot * translation
         self.cursor_pos = self.cursor_pos + translation
         self.round_vector(self.cursor_pos)
-        if self.state.grab:
-            for x in self.grabbed:
-                x.location = x.location + translation
+        for x in self.grabbed:
+            x.location = x.location + translation
         self.cdraw()
 
     def round_vector(self, vec):
@@ -759,19 +804,6 @@ class ModularBuildingTool:
         self.on_paint(obj)
         return obj
 
-    def set_active_group(self, i):
-        self.active_group = mid(0, i, len(self.module_groups) - 1)
-
-    def get_active_group(self):
-        if len(self.module_groups) > 0:
-            values = list(self.module_groups.values())
-            return values[self.active_group]
-
-    def get_active_module(self):
-        act_g = self.get_active_group()
-        if act_g is not None:
-            return act_g.modules[act_g.active]
-
     def copy(self):
         modules = self.get_modules()
         self.clipboard = [obj.data for obj in modules]
@@ -804,13 +836,18 @@ class ModularBuildingTool:
                     self.cdraw()
         self.cursor_pos = orig_cursor_pos
         self.state.select = False
+        self.construct_select_cube()
 
+    # todo all select cube stuff should go in ModularBuildingMode? (because UI)
     def construct_select_cube(self):
         if self.state.select:
             cube_min, cube_max = self.select_cube_bounds()
-            self.select_cube = construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
-                                                    cube_min.y - 0.5, cube_max.y + 0.5,
-                                                    cube_min.z, cube_max.z + 1.0)
+        else:
+            cube_min, cube_max = self.cursor_pos, self.cursor_pos
+        self.select_cube = construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
+                                                cube_min.y - 0.5, cube_max.y + 0.5,
+                                                cube_min.z, cube_max.z + 1.0)
+
 
     def select_cube_bounds(self):
         start = self.select_start_pos
@@ -825,10 +862,6 @@ class ModularBuildingTool:
         self.end_select()
         self.state.paint = False
 
-class QuitError(Exception):
-    # not an error lol
-    pass
-
 class ModularBuildingMode(ModularBuildingTool, Operator):
     """Modal operator for constructing modular scenes"""
     bl_idname = "view3d.modular_building_mode"
@@ -841,41 +874,45 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         self._handle_3d = None
         self._handle_2d = None
         self.input_map = [
-            ['ESC', 'PRESS', self.handle_quit, None],
-            ['RET', 'PRESS', self.handle_paint, None],
-            ['RET', 'RELEASE', self.handle_paint_end, None],
-            ['X', 'PRESS', self.handle_clear, 'SHIFT'],
-            ['X', 'PRESS', self.handle_delete, None],
-            ['X', 'RELEASE', self.handle_delete_end, None],
-            ['TAB', 'PRESS', lambda: self.handle_cycle_module(-1), 'CTRL'],
-            ['TAB', 'PRESS', lambda: self.handle_cycle_module(1), None],
-            ['G', 'PRESS', self.handle_grab, None],
-            ['LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), 'CTRL'],
-            ['RIGHT_ARROW', 'PRESS', lambda: self.translate(1, 0, 0), 'CTRL'],
-            ['LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0, repeat=4), 'SHIFT'],
-            ['RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0, repeat=4), 'SHIFT'],
-            ['LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0), None],
-            ['RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0), None],
-            ['UP_ARROW', 'PRESS', lambda: self.translate(0, 0, 1), 'CTRL'],
-            ['DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -1), 'CTRL'],
-            ['UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1, repeat=4), 'SHIFT'],
-            ['DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1, repeat=4), 'SHIFT'],
-            ['UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1), None],
-            ['DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1), None],
-            ['C', 'PRESS', self.handle_copy, 'CTRL'],
-            ['V', 'PRESS', self.paste, 'CTRL'],
-            ['B', 'PRESS', self.handle_select, None],
-            ['ONE', 'PRESS', lambda: self.set_active_group(0), None],
-            ['TWO', 'PRESS', lambda: self.set_active_group(1), None],
-            ['THREE', 'PRESS', lambda: self.set_active_group(2), None],
-            ['FOUR', 'PRESS', lambda: self.set_active_group(3), None],
-            ['FIVE', 'PRESS', lambda: self.set_active_group(4), None],
-            ['SIX', 'PRESS', lambda: self.set_active_group(5), None],
-            ['SEVEN', 'PRESS', lambda: self.set_active_group(6), None],
-            ['EIGHT', 'PRESS', lambda: self.set_active_group(7), None],
-            ['NINE', 'PRESS', lambda: self.set_active_group(8), None],
-            ['ZERO', 'PRESS', lambda: self.set_active_group(9), None]
+            KeyInput('ESC', 'PRESS', self.handle_quit),
+            KeyInput('RET', 'PRESS', self.handle_paint),
+            KeyInput('RET', 'RELEASE', self.handle_paint_end),
+            KeyInput('X', 'PRESS', self.handle_clear, shift=True),
+            KeyInput('X', 'PRESS', self.handle_delete),
+            KeyInput('X', 'RELEASE', self.handle_delete_end),
+            KeyInput('TAB', 'PRESS', lambda: self.handle_cycle_module(-1), ctrl=True),
+            KeyInput('TAB', 'PRESS', lambda: self.handle_cycle_module(1), None),
+            KeyInput('G', 'PRESS', self.handle_grab, None),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), ctrl=True),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(1, 0, 0), ctrl=True),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0, repeat=4), shift=True),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0, repeat=4), shift=True),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0)),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0)),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.translate(0, 0, 1), ctrl=True),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -1), ctrl=True),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1, repeat=4), shift=True),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1, repeat=4), shift=True),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1)),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1)),
+            KeyInput('C', 'PRESS', self.handle_copy, ctrl=True),
+            KeyInput('V', 'PRESS', self.paste, ctrl=True),
+            KeyInput('B', 'PRESS', self.handle_select),
+            KeyInput('ONE', 'PRESS', lambda: self.set_active_group(0)),
+            KeyInput('TWO', 'PRESS', lambda: self.set_active_group(1)),
+            KeyInput('THREE', 'PRESS', lambda: self.set_active_group(2)),
+            KeyInput('FOUR', 'PRESS', lambda: self.set_active_group(3)),
+            KeyInput('FIVE', 'PRESS', lambda: self.set_active_group(4)),
+            KeyInput('SIX', 'PRESS', lambda: self.set_active_group(5)),
+            KeyInput('SEVEN', 'PRESS', lambda: self.set_active_group(6)),
+            KeyInput('EIGHT', 'PRESS', lambda: self.set_active_group(7)),
+            KeyInput('NINE', 'PRESS', lambda: self.set_active_group(8)),
+            KeyInput('ZERO', 'PRESS', lambda: self.set_active_group(9))
         ]
+
+    @classmethod
+    def poll(cls, context):
+        return not ModularBuildingMode.running_modal
 
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -921,9 +958,14 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
     def handle_quit(self):
         if self.state.grab:
             self.end_grab(cancel=True)
-            return
-        raise QuitError()
+        elif self.state.select:
+            # cancel
+            self.state.select = False
+            self.construct_select_cube()
+        else:
+            raise QuitError()
 
+    # it's weird that the state management is split between ModularBuildingTool and ModularBuildingMode like this...
     def handle_paint(self):
         if self.state.grab:
             # behaves same as space
@@ -995,15 +1037,15 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         else:
             # cancel
             self.state.select = False
+            self.construct_select_cube()
 
     def handle_input(self, event):
-        for type_, value, func, modifier in self.input_map:
-            if modifier == 'SHIFT' and not event.shift or \
-                                    modifier == 'CTRL' and not event.ctrl or \
-                                    modifier == 'ALT' and not event.alt:
+        for keyinput in self.input_map:
+            if keyinput.shift and not event.shift or \
+                keyinput.ctrl and not event.ctrl:
                 continue
-            if type_ == event.type and value == event.value:
-                func()
+            if keyinput.type == event.type and keyinput.value == event.value:
+                keyinput.func()
                 return {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}
 
@@ -1012,9 +1054,9 @@ def draw_callback_3d(self, context):
 
     mat = mat_world
 
-    if self.state.select:
-        t_cube = mat_transform_edges(mat, self.select_cube)
-        draw_wire(t_cube, YELLOW)
+    color = YELLOW if self.state.select else WHITE
+    t_cube = mat_transform_edges(mat, self.select_cube)
+    draw_wire(t_cube, color)
 
     mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
     mat_trans = mathutils.Matrix.Translation(self.cursor_pos)
@@ -1097,7 +1139,7 @@ class LinkAllMesh(Operator):
         return {'FINISHED'}
 
 #executes selection by order at 3d view
-class Selection(bpy.types.Header):
+class Selection(Header):
     bl_label = "Selection"
     bl_space_type = "VIEW_3D"
 
@@ -1129,13 +1171,176 @@ class Selection(bpy.types.Header):
                     if obj not in selected:
                         bpy.selection.remove(obj)
 
+class SmartMove(Operator):
+    bl_idname = "view3d.smart_move"
+    bl_label = "Smart Move"
+
+    running_modal = False
+    bi = 1.0  # big increment
+    si = 0.1  # small increment
+
+    # todo override header (hide gizmo?)
+
+    def __init__(self):
+        self.original_pos = None
+        self.original_rot = None
+        self.last_rot = None
+        self.input_map = [
+            KeyInput('ESC', 'PRESS', self.handle_cancel),
+            KeyInput('RIGHTMOUSE', 'PRESS', self.handle_cancel),
+            KeyInput('RET', 'PRESS', self.handle_commit),
+            KeyInput('LEFTMOUSE', 'PRESS', self.handle_commit),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-self.si, 0, 0), ctrl=True, shift=True),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(self.si, 0, 0), ctrl=True, shift=True),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.translate(0, 0, self.si), ctrl=True, shift=True),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -self.si), ctrl=True, shift=True),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-self.bi, 0, 0), ctrl=True),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(self.bi, 0, 0), ctrl=True),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.translate(0, 0, self.bi), ctrl=True),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -self.bi), ctrl=True),
+            # KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0, repeat=4), shift=True),
+            # KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0, repeat=4), shift=True),
+            # KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1, repeat=4), shift=True),
+            # KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1, repeat=4), shift=True),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-self.si, 0), shift=True),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(self.si, 0), shift=True),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, self.si), shift=True),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -self.si), shift=True),
+            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-self.bi, 0)),
+            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(self.bi, 0)),
+            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, self.bi)),
+            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -self.bi)),
+        ]
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None
+
+    def invoke(self, context, event):
+        if SmartMove.running_modal: return {'CANCELLED'}
+        if context.area.type == 'VIEW_3D':
+            self.init()
+            return {'RUNNING_MODAL'}
+        else:
+            self.report({'WARNING'}, "View3D not found, cannot run operator")
+            return {'CANCELLED'}
+
+    def modal(self, context, event):
+        context.area.tag_redraw()
+        try:
+            return self.handle_input(event)
+        except QuitError:
+            return self.quit()
+        except:
+            exc_type, exc_msg, exc_tb = sys.exc_info()
+            logging.error("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
+            return self.quit()
+
+    def quit(self):
+        SmartMove.running_modal = False
+        return {'CANCELLED'}
+
+    def init(self):
+        SmartMove.running_modal = True
+        bpy.context.window_manager.modal_handler_add(self)
+        self.original_pos = bpy.context.object.location.copy()
+        self.original_rot = bpy.context.object.rotation_euler.copy()
+
+    def handle_input(self, event):
+        for keyinput in self.input_map:
+            if keyinput.shift and not event.shift or \
+                keyinput.ctrl and not event.ctrl:
+                continue
+            if keyinput.type == event.type and keyinput.value == event.value:
+                keyinput.func()
+                return {'RUNNING_MODAL'}
+        return {'PASS_THROUGH'}
+
+    def handle_cancel(self):
+        bpy.context.object.location = self.original_pos
+        bpy.context.object.rotation_euler = self.original_rot
+        raise QuitError()
+
+    def handle_commit(self):
+        raise QuitError()
+
+    def translate(self, x, y, z):
+        vec = Vector((x, y, z))
+        vec.rotate(bpy.context.object.rotation_euler)
+        bpy.ops.transform.translate(value=vec)
+
+    def smart_move(self, x, y, repeat=1):
+        # move in x or y, but only if already facing that direction
+        mag = max(abs(x), abs(y))
+        z = normalized_XY_to_Zrot_rad(x, y)
+        rot = Euler((0.0, 0.0, z))
+        #obj_rot = bpy.context.object.rotation_quaternion
+        obj_rot = bpy.context.object.rotation_euler.to_quaternion()  # wtf
+        dif = obj_rot.rotation_difference(rot.to_quaternion())
+        if dif.angle < 0.01:
+            # translate
+            vec = Vector((0.0, mag, 0.0))
+            vec.rotate(obj_rot)
+            for i in range(repeat):
+                bpy.ops.transform.translate(value=vec)
+        else:
+            # rotate
+            bpy.context.object.rotation_euler = rot
+
+class SetActiveModule(Operator):
+    bl_idname = "view_3d.object_picker"
+    bl_label = "Set Active Module"
+
+    group = None
+    module_ = None
+
+    # todo make shortcut
+
+    @classmethod
+    def poll(cls, context):
+        if not ModularBuildingMode.running_modal: return False
+        obj = context.object
+        if obj is None: return False
+        data = obj.data
+        if data is None: return False
+        is_module = CUSTOM_PROPERTY_TYPE in data
+        if not is_module: return False
+        SetActiveModule.group = data[CUSTOM_PROPERTY_TYPE]
+        SetActiveModule.module_ = data.name
+        return True
+
+    def execute(self, context):
+        mbt = ModularBuildingTool.instance
+        mbt.set_active_group_name(self.group)
+        mbt.set_active_module_name(self.module_)
+        return {'FINISHED'}
+
+addon_keymaps = []
+
 def register():
     bpy.utils.register_module(__name__)
     bpy.types.Scene.mbt = PointerProperty(type=ModularBuildingToolProperties)
 
+    # keymap
+    wm = bpy.context.window_manager
+    if wm.keyconfigs.addon is None: return
+    km = wm.keyconfigs.addon.keymaps.new(name='Object Mode', space_type='EMPTY')
+    km.keymap_items.new(SmartMove.bl_idname, 'K', 'PRESS')
+
+    addon_keymaps.append(km)
+
+
 def unregister():
     bpy.utils.unregister_module(__name__)
     bpy.types.Scene.mbt = None
+
+    # keymap
+    wm = bpy.context.window_manager
+    if wm.keyconfigs.addon is None: return
+    for km in addon_keymaps:
+        wm.keyconfigs.addon.keymaps.remove(km)
+    # clear the list
+    addon_keymaps.clear()
 
 if __name__ == "__main__":
     register()
