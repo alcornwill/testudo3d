@@ -15,25 +15,7 @@ is also unnecessarily slow
 * copy/paste/grab doesn't work with box select (haven't got round to it)  
 * undo / redo doesn't work  
 (changes are still pushed to undo stack when you exit tool)
-### Modules
-modules should be 1x1x1 or smaller  
-multi-cell modules may be supported in the future
-### Module Groups
-Modules are organised into groups  
-When you paint over a module of the same group it is replaced  
-However, one module of each group can coexist in the same 'cell'  
-The exception to this is 'walls'. there can be one for each side of the cell  
-Though you can name a group whatever you like, __groups also have special meaning when using generators__
-### Room Generator
-'room' is a special module group that automatically generates the walls, floors and ceilings for a room of any shape  
 
-there are 3 paint modes:
-* __Active Module__: use the active module of each module group
-* __Weighted Random__: uses weights defined in metadata
-* __Dither__: dither between the first two modules in the group  
-(could be useful for windows) 
-
-you can also add custom rooms with the metadata json (see example)
 ## Install
 in blender:
 * File > User Preferences
@@ -64,26 +46,5 @@ Work in a new .blend file and link your module library (3D View > MBT > Link Mod
 * __X__ delete
 * __CTRL C/V__ copy/paste
 * __G__ to grab (__ESC__ to cancel)
-## Usage Advanced
-once you exit the tool, you can move the root object and rotate it. scaling is not recommended
-### More Controls
-* __SHIFT cursor keys__ move faster
-* __CTRL LEFT/RIGHT__ strafe
-* __SHIFT X__ clear
-* __B__ 3D box select (__ENTER__, __X__, __SHIFT X__ work as expected)
-### Metadata Json
-some features of MBT require a metadata json file  
-see the example metadata  
-### Constraints
-you can go even further with modularity by joining together rooms with constraints    
-__Connect Objects__ is another feature of MBT to make this easier  
-* select two objects
-* 3D VIEW > MBT > Connect Objects
 
-this will create a CopyLocation and CopyRotation constraint on the first object
-### Smart Move
-utility to make it easier to arrange modular assets  
-modal operator invoked with 'K'
-### Set Active Module
-since using tab/shift+tab to switch modules is awkward, 
-this will set selected module as active
+see [wiki](https://github.com/alcornwill/modular_building_tool/wiki) for more info

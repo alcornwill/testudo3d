@@ -397,9 +397,12 @@ class LinkAllMesh(Operator):
     def execute(self, context):
         mbt = context.scene.mbt
         with bpy.data.libraries.load(mbt.module_library_path, link=True) as (data_src, data_dst):
+            # link meshes
             data_dst.meshes = data_src.meshes
             self.report({'INFO'}, 'linked {} meshes'.format(len(data_src.meshes)))
-
+            # link src scene. assume only has one
+            scene = data_src.scenes[0]
+            data_dst.scenes = [scene]
         return {'FINISHED'}
 
 class Selection(Header):
@@ -557,8 +560,6 @@ class SetActiveModule(Operator):
     group = None
     module_ = None
 
-    # todo make shortcut
-
     @classmethod
     def poll(cls, context):
         if not ModularBuildingMode.running_modal: return False
@@ -576,6 +577,7 @@ class SetActiveModule(Operator):
         mbt = ModularBuildingTool.instance
         mbt.set_active_group_name(self.group)
         mbt.set_active_module_name(self.module_)
+        update_3dviews()
         return {'FINISHED'}
 
 def register():
@@ -587,6 +589,7 @@ def register():
     if wm.keyconfigs.addon is None: return
     km = wm.keyconfigs.addon.keymaps.new(name='Object Mode', space_type='EMPTY')
     km.keymap_items.new(SmartMove.bl_idname, 'K', 'PRESS')
+    km.keymap_items.new(SetActiveModule.bl_idname, 'E', 'PRESS')
 
     addon_keymaps.append(km)
 
