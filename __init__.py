@@ -514,8 +514,8 @@ class SmartMove(Operator):
 
     def handle_input(self, event):
         for keyinput in self.input_map:
-            if keyinput.shift and not event.shift or \
-                            keyinput.ctrl and not event.ctrl:
+            if (keyinput.shift and not event.shift or
+                keyinput.ctrl and not event.ctrl):
                 continue
             if keyinput.type == event.type and keyinput.value == event.value:
                 keyinput.func()

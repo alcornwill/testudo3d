@@ -36,7 +36,7 @@ class Vec2:
 
 text_cursor = Vec2(0, 0)  # used for UI
 
-SEARCH_RANGE = 0.5
+SEARCH_RANGE = 0.01  # should be as smaller than min(tilesize.x, tilesize.y)/2
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
 # ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
@@ -49,6 +49,7 @@ PURPLE = (1.0, 0.0, 1.0, 1.0)
 GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
 CUSTOM_PROPERTY_TYPE = "MBT_type"
+CUSTOM_PROPERTY_TILE_SIZE_Z = "MBT_tile_size_z"
 METADATA_WEIGHTS = "weights"
 METADATA_CUSTOM_ROOMS = "custom_rooms"
 METADATA_CUSTOM_GROUPS = "custom_groups"
@@ -105,6 +106,11 @@ def rot_conv(rot):
     # todo found it https://docs.blender.org/api/blender_python_api_2_70_release/mathutils.html
     # quaternion .rotation_difference()
     return int(round(math.degrees(rot))) % 360
+
+def round_vector(vec):
+    vec.x = round(vec.x)
+    vec.y = round(vec.y)
+    vec.z = round(vec.z)
 
 def update_3dviews():
     for window in bpy.context.window_manager.windows:
@@ -411,6 +417,8 @@ class ModularBuildingModeState:
     grab = False
     select = False
 
+tilesize = Vector((1.0, 1.0, 1.0))
+
 class ModularBuildingTool:
     instance = None
 
@@ -421,7 +429,7 @@ class ModularBuildingTool:
         self.module_groups = collections.OrderedDict()
         self.active_group = 0
         self.modules = {}
-        self.cursor_pos = Vector((0, 0, 0))
+        self._cursor_pos = Vector((0, 0, 0))
         # self.cursor_tilt = 0  # may be useful for slopes (like rollarcoaster tycoon)
         self.cursor_rot = 0
         self.state = ModularBuildingModeState()
@@ -439,6 +447,15 @@ class ModularBuildingTool:
         logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
         Painter.mbt = self
         ModuleFinder.mbt = self
+
+    def get_cursor_pos(self):
+        return self._cursor_pos
+
+    def set_cursor_pos(self, value):
+        # todo manage internal cursor_pos that is multiplied by tilesize_z
+        self._cursor_pos = value
+
+    cursor_pos = property(get_cursor_pos, set_cursor_pos)
 
     def init(self, metadata_path):
         use_metadata = metadata_path != ""
@@ -541,6 +558,8 @@ class ModularBuildingTool:
         if self.root_obj is None:
             bpy.ops.object.empty_add()
             self.root_obj = bpy.context.scene.objects.active
+        if CUSTOM_PROPERTY_TILE_SIZE_Z not in self.root_obj:
+            self.root_obj[CUSTOM_PROPERTY_TILE_SIZE_Z] = 1.0
         logging.debug("initialized root obj")
 
     def error(self, msg):
@@ -612,15 +631,10 @@ class ModularBuildingTool:
         mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
         translation = mat_rot * translation
         self.cursor_pos = self.cursor_pos + translation
-        self.round_vector(self.cursor_pos)
+        round_vector(self.cursor_pos)
         for x in self.grabbed:
             x.location = x.location + translation
         self.cdraw()
-
-    def round_vector(self, vec):
-        vec.x = round(vec.x)
-        vec.y = round(vec.y)
-        vec.z = round(vec.z)
 
     def smart_move(self, x, y, repeat=1):
         # move in x or y, but only if already facing that direction

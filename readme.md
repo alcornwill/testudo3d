@@ -20,7 +20,7 @@ is also unnecessarily slow
 in blender:
 * File > User Preferences
 * Add-ons > Install from File
-* navigate to __modular_building_tool.py__
+* navigate to __modular_building_tool__ directory
 * after installed, search for and enable 'modular building tool'
 ## Usage
 MBT uses the mesh data in your blend file to build with    
