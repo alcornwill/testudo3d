@@ -1,5 +1,5 @@
 # Modular Building Tool (MBT)
-(todo youtube video)  
+[youtube](https://www.youtube.com/watch?v=4p2CRIq-Aa0)  
 create modular scenes, a common technique in game development
 ### Features
 * __'paint' with modules in 3D__
