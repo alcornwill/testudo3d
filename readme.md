@@ -17,11 +17,8 @@ is also unnecessarily slow
 (changes are still pushed to undo stack when you exit tool)
 
 ## Install
-in blender:
-* File > User Preferences
-* Add-ons > Install from File
-* navigate to __modular_building_tool__ directory
-* after installed, search for and enable 'modular building tool'
+create new directory 'modular_building_tool' in blender addons directory  
+copy \_\_init__.py and modular_building_tool.py to it
 ## Usage
 MBT uses the mesh data in your blend file to build with    
 ### Setup
