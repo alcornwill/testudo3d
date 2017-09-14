@@ -61,9 +61,9 @@ class MbtTest:
     def test_init(self):
         # wow this is so much nicer without all the try/except...
         import logging
-        import modular_building_tool
+        import tilemap3d
         global mbt
-        mbt = modular_building_tool.ModularBuildingTool(logging_level=logging.DEBUG)
+        mbt = tilemap3d.ModularBuildingTool(logging_level=logging.DEBUG)
         mbt.init(self.metadata_path)
 
     def logic(self):

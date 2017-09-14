@@ -32,7 +32,7 @@ bl_info = {
 import sys
 import bpy
 # noinspection PyUnresolvedReferences
-from mathutils import Vector, Quaternion, Euler
+from mathutils import Vector, Quaternion, Euler, Matrix
 # noinspection PyUnresolvedReferences
 from bpy.props import (
     StringProperty,
@@ -49,7 +49,7 @@ from bpy.types import (
     PropertyGroup,
     Header
 )
-from .modular_building_tool import *
+from .tilemap3d import *
 
 addon_keymaps = []
 
@@ -113,7 +113,7 @@ class ModularBuildingToolPanel(Panel):
         layout.operator(ConnectObjects.bl_idname)
 
     def display_selected_module_type(self, context):
-        active_object = context.active_object
+        active_object = context.active_object  # todo look at multiple
         if active_object is not None:
             data = active_object.data
             if data is not None:
@@ -314,16 +314,17 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
 def draw_callback_3d(self, context):
     if context.scene != self.active_scene: return
     mat_world = self.root_obj.matrix_world
+    mat_scale = Matrix.Scale(self.tilesize_z, 4, Vector((0.0, 0.0, 1.0)))
 
-    mat = mat_world
+    mat = mat_world * mat_scale
 
     color = YELLOW if self.state.select else WHITE
     t_cube = mat_transform_edges(mat, self.select_cube)
     draw_wire(t_cube, color)
 
-    mat_rot = mathutils.Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
-    mat_trans = mathutils.Matrix.Translation(self.cursor_pos)
-    mat = mat_trans * mat_rot
+    mat_rot = Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
+    mat_trans = Matrix.Translation(self.cursor_pos)
+    mat = mat_scale * mat_trans * mat_rot
     mat = mat_world * mat
 
     t_arrow = mat_transform(mat, ARROW)

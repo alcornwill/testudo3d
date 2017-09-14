@@ -26,7 +26,7 @@ import collections
 import mathutils
 import math
 import random
-# noinspection PyUnresolvedReferences
+
 from mathutils import Vector, Quaternion, Euler
 
 class Vec2:
@@ -59,7 +59,9 @@ ADJACENCY_VECTORS = (
     Vector((0, 1, 0)),
     Vector((0, -1, 0)),
     Vector((0, 0, 1)),
-    Vector((0, 0, -1))
+    Vector((0, 0, -1)),
+    # could expand to have 8 corners too? (26-bit)
+    # or not do vertical adjacency but do corners (8-bit)
 )
 
 def get_key(dict_, key, default=None):
@@ -155,17 +157,6 @@ def restore_gl_defaults():
     bgl.glEnable(bgl.GL_DEPTH_TEST)
     bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
 
-def create_cube(position=None, rotz=None, scale=None):
-    bpy.ops.mesh.primitive_cube_add()
-    cube = bpy.context.scene.objects.active
-    if position is not None:
-        cube.location = position
-    if rotz is not None:
-        cube.rotation_euler = mathutils.Euler((0, 0, math.radians(rotz)))
-    if scale is not None:
-        cube.scale = scale
-    return cube
-
 def delete_object(obj):
     bpy.data.objects.remove(obj, True)
     logging.debug("deleted 1 object")
@@ -211,6 +202,26 @@ def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
 
 def log_created(obj):
     logging.debug("created {}".format(str(obj)))
+
+class ModuleFinder:
+    mbt = None
+
+    def __init__(self):
+        self.kd = None
+        self.childs = None
+
+        # init
+        self.childs = self.mbt.root_obj.children
+        size = len(self.childs)
+        self.kd = mathutils.kdtree.KDTree(size)
+
+        for i, child in enumerate(self.childs):
+            #self.kd.insert(child.location, i)
+            self.kd.insert(self.mbt.get_tilepos(child), i)
+        self.kd.balance()
+
+    def get_modules_at(self, pos):
+        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
 
 class Module:
     def __init__(self, data, name, group_name):
@@ -391,25 +402,6 @@ class RoomPainter(Painter):
         draw_text_2d(mode_name, size=15, color=YELLOW)
         draw_text_2d("room", size=25, color=YELLOW)
 
-class ModuleFinder:
-    mbt = None
-
-    def __init__(self):
-        self.kd = None
-        self.childs = None
-
-        # init
-        self.childs = self.mbt.root_obj.children
-        size = len(self.childs)
-        self.kd = mathutils.kdtree.KDTree(size)
-
-        for i, child in enumerate(self.childs):
-            self.kd.insert(child.location, i)
-        self.kd.balance()
-
-    def get_modules_at(self, pos):
-        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
-
 class ModularBuildingModeState:
     paint = False
     clear = False
@@ -426,10 +418,11 @@ class ModularBuildingTool:
         self.weight_info = {}
         self.metadata = None
         self.root_obj = None
+        self.tilesize_z = 1.0
         self.module_groups = collections.OrderedDict()
         self.active_group = 0
         self.modules = {}
-        self._cursor_pos = Vector((0, 0, 0))
+        self.cursor_pos = Vector((0, 0, 0))
         # self.cursor_tilt = 0  # may be useful for slopes (like rollarcoaster tycoon)
         self.cursor_rot = 0
         self.state = ModularBuildingModeState()
@@ -447,15 +440,6 @@ class ModularBuildingTool:
         logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
         Painter.mbt = self
         ModuleFinder.mbt = self
-
-    def get_cursor_pos(self):
-        return self._cursor_pos
-
-    def set_cursor_pos(self, value):
-        # todo manage internal cursor_pos that is multiplied by tilesize_z
-        self._cursor_pos = value
-
-    cursor_pos = property(get_cursor_pos, set_cursor_pos)
 
     def init(self, metadata_path):
         use_metadata = metadata_path != ""
@@ -560,6 +544,7 @@ class ModularBuildingTool:
             self.root_obj = bpy.context.scene.objects.active
         if CUSTOM_PROPERTY_TILE_SIZE_Z not in self.root_obj:
             self.root_obj[CUSTOM_PROPERTY_TILE_SIZE_Z] = 1.0
+        self.tilesize_z = self.root_obj[CUSTOM_PROPERTY_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
         logging.debug("initialized root obj")
 
     def error(self, msg):
@@ -599,6 +584,16 @@ class ModularBuildingTool:
         if act_g is not None:
             return act_g.modules[act_g.active]
 
+    def get_tilepos(self, obj):
+        vec = obj.location.copy()
+        vec.z /= self.tilesize_z
+        return vec
+
+    def set_tilepos(self, obj, vec):
+        vec = vec.copy()
+        vec.z *= self.tilesize_z
+        obj.location = vec
+
     def clear(self):
         delete_objects(self.get_modules())
 
@@ -633,7 +628,9 @@ class ModularBuildingTool:
         self.cursor_pos = self.cursor_pos + translation
         round_vector(self.cursor_pos)
         for x in self.grabbed:
-            x.location = x.location + translation
+            pos = self.get_tilepos(x)
+            self.set_tilepos(x, pos + translation)
+            #x.location = x.location + translation
         self.cdraw()
 
     def smart_move(self, x, y, repeat=1):
@@ -686,7 +683,8 @@ class ModularBuildingTool:
                 # reset transform of grabbed
                 o = self.grabbed[x]
                 rot = self.original_rots[x]
-                o.location = self.original_pos
+                #o.location = self.original_pos
+                self.set_tilepos(o, self.original_pos)
                 o.rotation_euler.z = rot
         else:
             # combine with modules at destination
@@ -696,10 +694,22 @@ class ModularBuildingTool:
         self.grabbed.clear()
         self.original_rots.clear()
 
+    def create_cube(self, position=None, rotz=None, scale=None):
+        bpy.ops.mesh.primitive_cube_add()
+        cube = bpy.context.scene.objects.active
+        if position is not None:
+            # cube.location = position
+            self.set_tilepos(cube, position)
+        if rotz is not None:
+            cube.rotation_euler = mathutils.Euler((0, 0, math.radians(rotz)))
+        if scale is not None:
+            cube.scale = scale
+        return cube
+
     def create_obj(self, data):
         # creates object with data at cursor
         # create a cube then change it to a whatever
-        obj = create_cube(position=self.cursor_pos, rotz=self.cursor_rot)
+        obj = self.create_cube(position=self.cursor_pos, rotz=self.cursor_rot)
         cube = obj.data
         obj.data = data
         obj.name = data.name
