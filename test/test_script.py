@@ -9,38 +9,6 @@ RESULTS_DIR = "results"
 # NOTE: requires blender in PATH
 COMMAND ='blender --background test.blend --python test_script.py -- --test {}'
 
-def draw_pixel(x, y):
-    from mathutils import Vector
-    t3d.cursor_pos = Vector((x, y, 0.0))
-    t3d.paint()
-
-def circle(radius):
-    # todo this could be T3D brush
-    t3d.state.paint = True
-    orig_pos = t3d.cursor_pos
-    x0 = orig_pos.x
-    y0 = orig_pos.y
-    x = radius
-    y = 0
-    err = 0
-
-    while x >= y:
-        draw_pixel(x0 + x, y0 + y)
-        draw_pixel(x0 + y, y0 + x)
-        draw_pixel(x0 - y, y0 + x)
-        draw_pixel(x0 - x, y0 + y)
-        draw_pixel(x0 - x, y0 - y)
-        draw_pixel(x0 - y, y0 - x)
-        draw_pixel(x0 + y, y0 - x)
-        draw_pixel(x0 + x, y0 - y)
-
-        y += 1
-        if err <= 0:
-            err += 2*y + 1
-        if err > 0:
-            x -= 1
-            err -= 2*x + 1
-
 class T3DTest:
     name = None
     save_blend = False
@@ -60,7 +28,7 @@ class T3DTest:
         import logging
         import tilemap3d
         global t3d
-        t3d = tilemap3d.Tilemap3D(logging_level=logging.DEBUG)
+        t3d = tilemap3d.Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
@@ -90,7 +58,16 @@ class CircleTest(T3DTest):
 
     def execute(self):
         t3d.active_tile3d = 'Suzanne'
-        circle(radius=8)
+        t3d.circle(8)
+
+class LineTest(T3DTest):
+    name = "line_test"
+    save_blend = True
+
+    def execute(self):
+        t3d.active_tile3d = 'Suzanne'
+        # t3d.line(0, 0, 9, 3)
+        t3d.line(0, 0, 1, 9)
 
 class CombinedTest(T3DTest):
     name = "combined_test"
@@ -104,16 +81,12 @@ class CombinedTest(T3DTest):
 
         # paint
         t3d.translate(0, 1, 0)
-        t3d.state.paint = True
-        t3d.cdraw()
-        t3d.state.paint = False
+        t3d.paint()
         t3d.translate(0, -1, 0)
 
         # grab
         t3d.translate(2, 0, 0)
-        t3d.state.paint = True
-        t3d.cdraw()
-        t3d.state.paint = False
+        t3d.paint()
         t3d.start_grab()
         t3d.translate(0, 2, 0)
         t3d.rotate(90)
@@ -123,13 +96,9 @@ class CombinedTest(T3DTest):
 
         # copy
         t3d.translate(2, 0, 0)
-        t3d.state.paint = True
-        t3d.cdraw()
-        t3d.state.paint = False
+        t3d.paint()
         t3d.copy()
-        t3d.state.clear = True
-        t3d.cdraw()
-        t3d.state.clear = False
+        t3d.delete()
         t3d.translate(0, 2, 0)
         t3d.paste()
         t3d.translate(0, -2, 0)
@@ -149,11 +118,66 @@ class CombinedTest(T3DTest):
         t3d.translate(0, -2, 0)
         t3d.start_select()
         t3d.translate(0, 2, 0)
-        t3d.state.clear = True
-        t3d.end_select()
-        t3d.state.clear = False
+        t3d.clear()
         t3d.translate(0, -2, 0)
 
+class TurtleTest(T3DTest):
+    name = "turtle_test"
+    save_blend = True
+
+    def replace(self, seq, replacementRules, n ):
+        for i in range(n):
+            newseq = ""
+            for element in seq:
+                newseq = newseq + replacementRules.get(element,element)
+            seq = newseq
+        return seq
+
+    def draw(self, commands, rules ):
+        for b in commands:
+            try:
+                rules[b]()
+            except TypeError:
+                try:
+                    draw(rules[b], rules)
+                except:
+                    pass
+
+    def execute(self):
+        t3d.active_tile3d = 'Suzanne'
+        # self.basic()
+        self.snake_kolam()
+
+    def basic(self):
+        t3d.down()
+        t3d.forward(7.5)
+        t3d.left(45)
+        t3d.forward(7.5)
+        t3d.left(45)
+        t3d.forward(7.5)
+
+    def snake_kolam(self):
+        # Python36\Lib\turtledemo\lindenmayer.py
+
+        def r():
+            t3d.right(45)
+
+        def l():
+            t3d.left(45)
+
+        def f():
+            t3d.forward(3)
+
+        snake_rules = {"-":r, "+":l, "f":f, "b":"f+f+f--f--f+f+f"}
+        snake_replacementRules = {"b": "b+f+b--f--b+f+b"}
+        snake_start = "b--f--b--f"
+
+        drawing = self.replace(snake_start, snake_replacementRules, 3)
+
+        t3d.up()
+        t3d.backward(25)
+        t3d.down()
+        self.draw(drawing, snake_rules)
 
 def get_tests():
     global tests

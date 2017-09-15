@@ -110,7 +110,7 @@ class T3DPaintMode(Tilemap3D, Operator):
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
             KeyInput('RET', 'RELEASE', self.handle_paint_end),
-            KeyInput('X', 'PRESS', self.handle_clear),
+            KeyInput('X', 'PRESS', self.handle_delete),
             KeyInput('X', 'RELEASE', self.handle_delete_end),
             KeyInput('G', 'PRESS', self.handle_grab, None),
             KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), ctrl=True),
@@ -202,18 +202,18 @@ class T3DPaintMode(Tilemap3D, Operator):
     def handle_paint_end(self):
         self.state.paint = False
 
-    def handle_clear(self):
+    def handle_delete(self):
         if self.state.select:
-            self.state.clear = True
+            self.state.delete = True
             self.end_select()
-            self.state.clear = False
-        elif not self.state.grab and not self.state.clear:
-            self.state.clear = True
+            self.state.delete = False
+        elif not self.state.grab and not self.state.delete:
+            self.state.delete = True
             self.cdraw()
 
     def handle_delete_end(self):
         self.state.delete = False
-        self.state.clear = False
+        self.state.delete = False
 
     def handle_grab(self):
         if not self.state.grab:
