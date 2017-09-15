@@ -7,10 +7,9 @@ tests = {}
 t3d = None
 RESULTS_DIR = "results"
 # NOTE: requires blender in PATH
-COMMAND ='blender --background debug.blend --python test_script.py -- --test {}'
+COMMAND ='blender --background test.blend --python test_script.py -- --test {}'
 
 def draw_pixel(x, y):
-    # noinspection PyUnresolvedReferences
     from mathutils import Vector
     t3d.cursor_pos = Vector((x, y, 0.0))
     t3d.paint()
@@ -45,17 +44,15 @@ def circle(radius):
 class T3DTest:
     name = None
     save_blend = False
-    metadata_path = None
 
     def run_in_blender(self):
         # invokes blender from command line, with itself as parameter!
-
         call(COMMAND.format(self.name), shell=True)
 
     def run(self):
         # run
         self.test_init()
-        self.logic()
+        self.execute()
         self.test_end()
 
     def test_init(self):
@@ -64,9 +61,9 @@ class T3DTest:
         import tilemap3d
         global t3d
         t3d = tilemap3d.Tilemap3D(logging_level=logging.DEBUG)
-        t3d.init(self.metadata_path)
+        t3d.init()
 
-    def logic(self):
+    def execute(self):
         raise NotImplementedError()
 
     def test_end(self):
@@ -80,73 +77,83 @@ class T3DTest:
 class PaintTest(T3DTest):
     name = "paint_test"
     save_blend = True
-    metadata_path = "metadata.json"
 
-    def logic(self):
+    def execute(self):
         # paint something
+        t3d.active_tile3d = 'Suzanne'
         t3d.state.paint = True
         t3d.translate(0, 1, 0)
 
 class CircleTest(T3DTest):
     name = "circle_test"
     save_blend = True
-    metadata_path = "metadata.json"
 
-    def logic(self):
+    def execute(self):
+        t3d.active_tile3d = 'Suzanne'
         circle(radius=8)
 
 class CombinedTest(T3DTest):
     name = "combined_test"
     save_blend = True
-    metadata_path = "metadata.json"
 
-    def logic(self):
-        # for each tile3d and tile3d group, test features
-        for i in range(len(t3d.tile3d_groups)):
-            t3d.active_group = i
-            group = t3d.get_active_group()
-            for j in range(len(group.tiles)):
-                group.active = j
+    def execute(self):
+        t3d.active_tile3d = 'Suzanne'
+        # test all features
+        # features: paint, clear, copy, paste, grab
+        # also box select, all features should work on multiple cells
 
-                # paint
-                t3d.translate(0, 1, 0)
-                t3d.paint()
-                t3d.translate(0, -1, 0)
+        # paint
+        t3d.translate(0, 1, 0)
+        t3d.state.paint = True
+        t3d.cdraw()
+        t3d.state.paint = False
+        t3d.translate(0, -1, 0)
 
-                # grab
-                t3d.translate(2, 0, 0)
-                t3d.paint()
-                t3d.start_grab()
-                t3d.translate(0, 2, 0)
-                t3d.rotate(90)
-                t3d.end_grab()
-                t3d.rotate(-90)
-                t3d.translate(0, -2, 0)
+        # grab
+        t3d.translate(2, 0, 0)
+        t3d.state.paint = True
+        t3d.cdraw()
+        t3d.state.paint = False
+        t3d.start_grab()
+        t3d.translate(0, 2, 0)
+        t3d.rotate(90)
+        t3d.end_grab()
+        t3d.rotate(-90)
+        t3d.translate(0, -2, 0)
 
-                # copy
-                t3d.translate(2, 0, 0)
-                t3d.paint()
-                t3d.copy()
-                t3d.delete()
-                t3d.translate(0, 2, 0)
-                t3d.paste()
-                t3d.translate(0, -2, 0)
+        # copy
+        t3d.translate(2, 0, 0)
+        t3d.state.paint = True
+        t3d.cdraw()
+        t3d.state.paint = False
+        t3d.copy()
+        t3d.state.clear = True
+        t3d.cdraw()
+        t3d.state.clear = False
+        t3d.translate(0, 2, 0)
+        t3d.paste()
+        t3d.translate(0, -2, 0)
 
-                # box select fill
-                t3d.translate(2, 0, 0)
-                t3d.start_select()
-                t3d.translate(0, 1, 0)
-                t3d.fill()
-                t3d.translate(0, -1, 0)
+        # box select fill
+        t3d.translate(2, 0, 0)
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.fill()
+        t3d.translate(0, -2, 0)
 
-                # reset
-                t3d.cursor_pos.x = 0
-                t3d.translate(0, 0, 4)
+        # box select delete
+        t3d.translate(2, 0, 0)
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.fill()
+        t3d.translate(0, -2, 0)
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.state.clear = True
+        t3d.end_select()
+        t3d.state.clear = False
+        t3d.translate(0, -2, 0)
 
-            # reset
-            t3d.cursor_pos.x = 0
-            t3d.cursor_pos.z = 0
-            t3d.translate(0, -4, 0)
 
 def get_tests():
     global tests

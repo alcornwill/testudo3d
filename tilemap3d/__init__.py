@@ -31,6 +31,7 @@ bl_info = {
 
 import sys
 import bpy
+from math import ceil, sqrt
 from mathutils import Vector, Quaternion, Euler, Matrix
 from bpy.props import (
     StringProperty,
@@ -90,6 +91,8 @@ class Tilemap3DPanel(Panel):
         layout.operator(SetActiveTile3D.bl_idname)
         layout.separator()
         layout.operator(ConnectObjects.bl_idname)
+        layout.separator()
+        layout.operator(T3DSetupTilesOperator.bl_idname)
 
 class T3DPaintMode(Tilemap3D, Operator):
     """Modal operator for constructing modular scenes"""
@@ -107,8 +110,7 @@ class T3DPaintMode(Tilemap3D, Operator):
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
             KeyInput('RET', 'RELEASE', self.handle_paint_end),
-            KeyInput('X', 'PRESS', self.handle_clear, shift=True),
-            KeyInput('X', 'PRESS', self.handle_delete),
+            KeyInput('X', 'PRESS', self.handle_clear),
             KeyInput('X', 'RELEASE', self.handle_delete_end),
             KeyInput('G', 'PRESS', self.handle_grab, None),
             KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), ctrl=True),
@@ -200,15 +202,6 @@ class T3DPaintMode(Tilemap3D, Operator):
     def handle_paint_end(self):
         self.state.paint = False
 
-    def handle_delete(self):
-        if self.state.select:
-            self.state.delete = True
-            self.end_select()
-            self.state.delete = False
-        elif not self.state.grab and not self.state.delete:
-            self.state.delete = True
-            self.cdraw()
-
     def handle_clear(self):
         if self.state.select:
             self.state.clear = True
@@ -230,7 +223,7 @@ class T3DPaintMode(Tilemap3D, Operator):
 
     def handle_copy(self):
         self.copy()
-        self.report({'INFO'}, '({}) tiles copied to clipboard'.format(len(self.clipboard)))
+        self.report({'INFO'}, '({}) tiles copied to clipboard'.format("1" if self.clipboard else "0"))
 
     def handle_select(self):
         if not self.state.select:
@@ -370,7 +363,7 @@ class SetActiveTile3D(Operator):
         obj = context.object
         if obj is None: return False
         # assume is group instance
-        group = get_group_name(obj)
+        group = get_group(obj)
         if group is None:
             # else might be the linked object
             group = get_first_group_name(obj)
@@ -382,6 +375,67 @@ class SetActiveTile3D(Operator):
         t3d.set_active_tile3d(self.tile3d)
         update_3dviews()
         return {'FINISHED'}
+
+def select_all():
+    for obj in bpy.data.objects:
+        obj.select = True
+
+def deselect_all():
+    for obj in bpy.data.objects:
+        obj.select = False
+
+class T3DSetupTilesOperator(bpy.types.Operator):
+    """Setup 3D Tiles for tile library"""
+    bl_idname = 'view3d.t3d_setup_tiles'
+    bl_label = 'Setup 3D Tiles'
+
+    def __init__(self):
+        bpy.types.Operator.__init__(self)
+        self.objects = None
+
+    @classmethod
+    def poll(self, context):
+        return context.mode == "OBJECT"
+
+    def execute(self, context):
+        self.setup_tiles()
+        return {'FINISHED'}
+
+    def remove_all_groups(self):
+        select_all()
+        for group in self.objects:
+            bpy.ops.group.objects_remove_all()
+        deselect_all()
+
+    def create_groups(self):
+        for obj in self.objects:
+            group = bpy.data.groups.new(name=obj.name)
+            group.name = obj.name  # insist
+            group.objects.link(obj)
+            group.dupli_offset = obj.location
+
+    def layout_in_grid(self, border=2):
+        dimx = ceil(sqrt(len(self.objects)))
+        count = 0
+        x = 0
+        y = 0
+        offset = ((dimx - 1) * border) / 2
+
+        for obj in self.objects:
+            obj.location.x = x - offset
+            obj.location.y = y - offset
+            count += 1
+            x += border
+            if count >= dimx:
+                y += border
+                x = 0
+                count = 0
+
+    def setup_tiles(self):
+        self.objects = [obj for obj in bpy.data.objects if obj.type == 'MESH']
+        self.layout_in_grid()
+        self.remove_all_groups()
+        self.create_groups()
 
 def register():
     bpy.utils.register_module(__name__)

@@ -36,7 +36,7 @@ class Vec2:
 
 text_cursor = Vec2(0, 0)  # used for UI
 
-SEARCH_RANGE = 0.01  # should be as smaller than min(tilesize.x, tilesize.y)/2
+SEARCH_RANGE = 0.01
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
 # ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
@@ -48,11 +48,7 @@ YELLOW = (1.0, 1.0, 0.0, 1.0)
 PURPLE = (1.0, 0.0, 1.0, 1.0)
 GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
-CUSTOM_PROPERTY_TYPE = "T3D_type"
 CUSTOM_PROPERTY_TILE_SIZE_Z = "T3D_tile_size_z"
-METADATA_WEIGHTS = "weights"
-METADATA_CUSTOM_ROOMS = "custom_rooms"
-METADATA_CUSTOM_GROUPS = "custom_groups"
 ADJACENCY_VECTORS = (
     Vector((1, 0, 0)),
     Vector((-1, 0, 0)),
@@ -170,7 +166,7 @@ def delete_objects(objects):
     logging.debug("deleted {} objects".format(len(objects)))
     update_3dviews()
 
-def get_group_name(obj):
+def get_group(obj):
     if obj is not None and obj.dupli_group is not None:
         return obj.dupli_group.name
 
@@ -240,117 +236,6 @@ class RestoreCursorPos:
     def __exit__(self, exc_type, exc_value, traceback):
         self.t3d.cursor_pos = self.original_pos
 
-class Painter:
-    t3d = None
-
-    def __init__(self):
-        log_created(self)
-
-    def paint(self):
-        tile3d = self.t3d.get_active_tile3d()
-        if tile3d is not None:
-            self.t3d.paint_tile(tile3d)
-
-    def delete(self):
-        tiles = self.t3d.get_tiles()
-        delete_objects(tiles)
-
-    def clear(self):
-        self.t3d.clear()
-
-
-class AutoTilingPainter(Painter):
-    instance = None  # singleton
-
-    def __init__(self):
-        super().__init__()
-        AutoTilingPainter.instance = self
-        self.custom_rooms = {}
-        self.room_modes = [
-            (self.active_tile3d, "Active Tile3D"),
-            (self.weighted_random, "Weighted Random"),
-            (self.dither, "Dither")
-        ]
-
-    def init(self, group):
-        super().init(group)
-        self.group.tiles = [None] * 3  # hack
-
-    def paint(self):
-        self.room_paint()
-        self.repaint_adjacent()  # this is why it is so slow todo paint(width, height)
-
-    def delete(self):
-        self.t3d.clear()
-        self.repaint_adjacent()
-
-    def room_paint(self):
-        self.t3d.clear()
-        occupied = self.t3d.adjacent_occupied()
-        original_rot = self.t3d.cursor_rot
-        # paint walls
-        for i in range(4):
-            if not occupied[i]:
-                vec = ADJACENCY_VECTORS[i]
-                self.t3d.cursor_rot = normalized_XY_to_Zrot(vec.x, vec.y)
-                wall = self.room_get_tile3d("wall")
-                if wall is not None:
-                    self.t3d.paint_tile(wall.data)
-        # paint floor
-        if not occupied[5]:
-            floor = self.room_get_tile3d("floor")
-            if floor is not None:
-                self.t3d.paint_tile(floor.data)
-        # paint ceiling
-        if not occupied[4]:
-            ceiling = self.room_get_tile3d("ceiling")
-            if ceiling is not None:
-                self.t3d.paint_tile(ceiling.data)
-        self.t3d.cursor_rot = original_rot
-
-    def repaint_adjacent(self):
-        with RestoreCursorPos(self.t3d):
-            orig_curs_pos = self.t3d.cursor_pos
-            adjacent_occupied = self.t3d.adjacent_occupied()
-            for occupied, vec in zip(adjacent_occupied, ADJACENCY_VECTORS):
-                if occupied:
-                    self.t3d.cursor_pos = orig_curs_pos + vec
-                    self.room_paint()
-
-    def room_get_tile3d(self, type_):
-        mode_func, mode_name = self.room_modes[self.group.active]
-        return mode_func(type_)
-
-    def active_tile3d(self, type_):
-        return self.t3d.tile3d_groups[type_].active_tile3d()
-
-    def weighted_random(self, type_):
-        if type_ in self.t3d.weight_info:
-            return weighted_choice(self.t3d.weight_info[type_])
-
-    def dither(self, type_):
-        group = self.t3d.tile3d_groups[type_]
-        if len(group.tiles) > 0:
-            idx = int(self.t3d.cursor_pos.x + self.t3d.cursor_pos.y + self.t3d.cursor_pos.z)
-            idx %= len(group.tiles)
-            return group.tiles[idx]
-
-    def custom_room(self, custom_room, type_):
-        tile3d_name = custom_room[type_]
-        return self.t3d.tiles[tile3d_name]
-
-    @staticmethod
-    def add_custom_room(name, custom_room):
-        self = AutoTilingPainter.instance
-        self.group.tiles.append(None)
-        self.custom_rooms[name] = custom_room
-        self.room_modes.append((lambda type_: self.custom_room(custom_room, type_), name))
-
-    def draw_ui(self):
-        mode_func, mode_name = self.room_modes[self.group.active]
-        draw_text_2d(mode_name, size=15, color=YELLOW)
-        draw_text_2d("room", size=25, color=YELLOW)
-
 class PaintModeState:
     paint = False
     clear = False
@@ -364,8 +249,6 @@ class Tilemap3D:
     instance = None
 
     def __init__(self, logging_level=logging.INFO):
-        self.weight_info = {}
-        self.metadata = None
         self.root_obj = None
         self.tilesize_z = 1.0
         self.active_tile3d = None
@@ -375,19 +258,17 @@ class Tilemap3D:
         self.state = PaintModeState()
         self.select_start_pos = None
         self.select_cube = None
-        self.grabbed = []
+        self.grabbed = None
         # used to restore the properties of tiles when a grab operation is canceled
         self.original_pos = Vector()
-        self.original_rots = []
-        self.clipboard = []
-        self.clipboard_rots = []
+        self.original_rot = None
+        self.clipboard = None
+        self.clipboard_rot = None
 
         # init
         Tilemap3D.instance = self
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
-        Painter.t3d = self
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
         Tile3DFinder.t3d = self
-        self.painter = Painter()
 
     def init(self):
         self.init_root_obj()
@@ -416,6 +297,11 @@ class Tilemap3D:
         finder = Tile3DFinder()
         return finder.get_tiles_at(self.cursor_pos)
 
+    def get_tile3d(self):
+        tiles = self.get_tiles()
+        if len(tiles) > 0:
+            return tiles[0] # assume only one!
+
     def get_tilepos(self, obj):
         vec = obj.location.copy()
         vec.z /= self.tilesize_z
@@ -426,8 +312,13 @@ class Tilemap3D:
         vec.z *= self.tilesize_z
         obj.location = vec
 
+    def paint(self):
+        tile3d = self.get_active_tile3d()
+        if tile3d is not None:
+            self.paint_tile(tile3d)
+
     def clear(self):
-        delete_objects(self.get_tiles())
+        delete_object(self.get_tile3d())
 
     def adjacent_occupied(self):
         finder = Tile3DFinder()
@@ -435,19 +326,17 @@ class Tilemap3D:
 
     def cdraw(self):
         if self.state.paint:
-            self.painter.paint()
-        elif self.state.delete:
-            self.painter.delete()
+            self.paint()
         elif self.state.clear:
-            self.painter.clear()
+            self.clear()
         self.construct_select_cube()
 
     def rotate(self, rot):
         # rotate the cursor and paint
         self.cursor_rot = self.cursor_rot + rot
         logging.debug("rotated cursor {}".format(rot))
-        for x in self.grabbed:
-            x.rotation_euler[2] = x.rotation_euler[2] + math.radians(rot)
+        if self.state.grab:
+            self.grabbed.rotation_euler[2] = self.grabbed.rotation_euler[2] + math.radians(rot)
         self.cdraw()
 
     def translate(self, x, y, z):
@@ -458,10 +347,9 @@ class Tilemap3D:
         translation = mat_rot * translation
         self.cursor_pos = self.cursor_pos + translation
         round_vector(self.cursor_pos)
-        for x in self.grabbed:
-            pos = self.get_tilepos(x)
-            self.set_tilepos(x, pos + translation)
-            #x.location = x.location + translation
+        if self.state.grab:
+            pos = self.get_tilepos(self.grabbed)
+            self.set_tilepos(self.grabbed, pos + translation)
         self.cdraw()
 
     def smart_move(self, x, y, repeat=1):
@@ -475,46 +363,44 @@ class Tilemap3D:
             self.rotate(rot - self.cursor_rot)
 
     def on_paint(self):
-        self.on_paint_at(self.cursor_pos)
+        self.clear_at(self.cursor_pos)
 
-    def on_paint_at(self, pos):
-        # call this when creating or moving a tile3d. it replaces overlapping tiles
-        # 'blend' would be better name? combines src with dst
+    def clear_at(self, pos, ignore=None):
+        # hmm
         to_delete = []
         finder = Tile3DFinder()
         tiles = finder.get_tiles_at(pos)
+        if ignore is not None:
+            tiles = [tile for tile in tiles if tile not in ignore]
         delete_objects(tiles) # only one tile per cell now
 
     def start_grab(self):
+        tile3d = self.get_tile3d()
+        if tile3d is None: return
         logging.debug("start grab")
         self.state.grab = True
-        self.grabbed = self.get_tiles()
+        self.grabbed = tile3d
         self.original_pos = self.cursor_pos
-        for x in self.grabbed:
-            self.original_rots.append(x.rotation_euler.z)
+        self.original_rot = tile3d.rotation_euler.z
 
     def end_grab(self, cancel=False):
         logging.debug("end grab")
         self.state.grab = False
         if cancel:
-            for x in range(len(self.grabbed)):
-                # reset transform of grabbed
-                o = self.grabbed[x]
-                rot = self.original_rots[x]
-                #o.location = self.original_pos
-                self.set_tilepos(o, self.original_pos)
-                o.rotation_euler.z = rot
+            rot = self.original_rot
+            self.set_tilepos(self.grabbed, self.original_pos)
+            self.grabbed.rotation_euler.z = rot
         else:
             # combine with tiles at destination
             pos = self.cursor_pos  # assume objs are at cursor pos (invalid if was multi-cell grab)
-            for g in self.grabbed:
-                self.on_paint_at(pos, rot_conv(g.rotation_euler.z), g)
-        self.grabbed.clear()
-        self.original_rots.clear()
+            self.clear_at(pos, ignore=[self.grabbed])
+        self.grabbed = None
+        self.original_rot = None
 
     def create_tile(self, group, position=None, rotz=None, scale=None):
         bpy.ops.object.group_instance_add(group=group)
         tile3d = bpy.context.scene.objects.active
+        tile3d.empty_draw_size = 0.25
         if position is not None:
             # cube.location = position
             self.set_tilepos(tile3d, position)
@@ -534,19 +420,20 @@ class Tilemap3D:
         return obj
 
     def copy(self):
-        tiles = self.get_tiles()
-        self.clipboard = [obj.data for obj in tiles]
-        self.clipboard_rots.clear()
-        for x in tiles:
-            self.clipboard_rots.append(x.rotation_euler.z)
-        logging.debug("copied {} objects to clipboard".format(len(self.clipboard)))
+        tile3d = self.get_tile3d()
+        if tile3d:
+            self.clipboard = get_group(tile3d)
+            self.clipboard_rot = tile3d.rotation_euler.z
+        else:
+            self.clipboard = None
+            self.clipboard_rot = None
+        logging.debug("copied {} objects to clipboard".format("1" if self.clipboard else "0"))
 
     def paste(self):
-        for x in range(len(self.clipboard)):
-            data = self.clipboard[x]
-            new = self.paint_tile(data)
-            new.rotation_euler.z = self.clipboard_rots[x]
-        logging.debug("pasted {} objects".format(len(self.clipboard)))
+        if self.clipboard:
+            new = self.paint_tile(self.clipboard)
+            new.rotation_euler.z = self.clipboard_rot
+        logging.debug("pasted {} objects".format("1" if self.clipboard else "0"))
 
     def start_select(self):
         logging.debug("start box select")
@@ -577,7 +464,6 @@ class Tilemap3D:
                                                 cube_min.y - 0.5, cube_max.y + 0.5,
                                                 cube_min.z, cube_max.z + 1.0)
 
-
     def select_cube_bounds(self):
         start = self.select_start_pos
         end = self.cursor_pos
@@ -585,17 +471,7 @@ class Tilemap3D:
         cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
         return cube_min, cube_max
 
-    # human API stuff
-    def delete(self):
-        self.state.delete = True
-        self.cdraw()
-        self.state.delete = False
-
-    def paint(self):
-        self.state.paint = True
-        self.cdraw()
-        self.state.paint = False
-
+    # hmm
     def fill(self):
         self.state.paint = True
         self.end_select()
