@@ -18,12 +18,12 @@
 
 
 bl_info = {
-    "name": "Modular Building Tool",
+    "name": "Tilemap3D",
     "author": "Will Alcorn",
     "version": (0, 1),
     "blender": (2, 78, 0),
-    "location": "3D View > Tools > MBT",
-    "description": "create modular scenes",
+    "location": "3D View > Tools > T3D",
+    "description": "create 3D tilemaps",
     "warning": "",
     "wiki_url": "https://github.com/alcornwill/modular_building_tool",
     "category": "3D View",
@@ -31,9 +31,7 @@ bl_info = {
 
 import sys
 import bpy
-# noinspection PyUnresolvedReferences
 from mathutils import Vector, Quaternion, Euler, Matrix
-# noinspection PyUnresolvedReferences
 from bpy.props import (
     StringProperty,
     BoolProperty,
@@ -42,7 +40,6 @@ from bpy.props import (
     EnumProperty,
     PointerProperty,
 )
-# noinspection PyUnresolvedReferences
 from bpy.types import (
     Panel,
     Operator,
@@ -54,7 +51,7 @@ from .tilemap3d import *
 addon_keymaps = []
 
 class QuitError(Exception):
-    # not an error lol
+    # note: not an error
     pass
 
 class KeyInput:
@@ -65,67 +62,39 @@ class KeyInput:
         self.ctrl = ctrl
         self.shift = shift
 
-class ModularBuildingToolProperties(PropertyGroup):
-    metadata_path = StringProperty(
-        name="Metadata Path",
-        description="Path to metadata json file",
+class Tilemap3DProperties(PropertyGroup):
+    tile3d_library_path = StringProperty(
+        name="Tile3D Library Path",
+        description="Path to your tile3d library .blend file",
         subtype="FILE_PATH"
     )
 
-    module_library_path = StringProperty(
-        name="Module Library Path",
-        description="Path to your module library .blend file",
-        subtype="FILE_PATH"
-    )
-
-    module_type = StringProperty(
-        name="Module Type",
-        description="module type: 'floor', 'wall' or 'ceiling'"
-    )
-
-class ModularBuildingToolPanel(Panel):
-    bl_idname = "view3d.modular_building_tool_panel"
-    bl_label = "Modular Building Tool Panel"
+class Tilemap3DPanel(Panel):
+    bl_idname = "view3d.tilemap3d_panel"
+    bl_label = "Tilemap3D Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS'
-    bl_category = "MBT"
+    bl_category = "T3D"
     bl_context = "objectmode"
 
     def draw(self, context):
         layout = self.layout
-        mbt = context.scene.mbt
+        t3d = context.scene.t3d
 
-        layout.prop(mbt, 'metadata_path', text="")
         row = layout.row(align=True)
         sub = row.row(align=True)
         sub.scale_x = 3.0
-        sub.prop(mbt, 'module_library_path', text="")
-        row.operator(LinkAllMesh.bl_idname)
-        layout.operator(ModularBuildingMode.bl_idname)
-        layout.operator(SetActiveModule.bl_idname)
-        self.display_selected_module_type(context)
-        row = layout.row(align=True)
-        sub = row.row(align=True)
-        sub.scale_x = 3.0
-        sub.prop(mbt, 'module_type')
-        row.operator(SetModuleTypeOperator.bl_idname)
+        sub.prop(t3d, 'tile3d_library_path', text="")
+        row.operator(LinkTile3DLibrary.bl_idname)
+        layout.operator(T3DPaintMode.bl_idname)
+        layout.operator(SetActiveTile3D.bl_idname)
         layout.separator()
         layout.operator(ConnectObjects.bl_idname)
 
-    def display_selected_module_type(self, context):
-        active_object = context.active_object  # todo look at multiple
-        if active_object is not None:
-            data = active_object.data
-            if data is not None:
-                current_type = None
-                if CUSTOM_PROPERTY_TYPE in data:
-                    current_type = data[CUSTOM_PROPERTY_TYPE]
-                self.layout.label("Selected Module Type: {}".format(current_type))
-
-class ModularBuildingMode(ModularBuildingTool, Operator):
+class T3DPaintMode(Tilemap3D, Operator):
     """Modal operator for constructing modular scenes"""
-    bl_idname = "view3d.modular_building_mode"
-    bl_label = "Modular Building Mode"
+    bl_idname = "view3d.t3d_paint_mode"
+    bl_label = "T3D Paint Mode"
 
     running_modal = False
 
@@ -141,8 +110,6 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             KeyInput('X', 'PRESS', self.handle_clear, shift=True),
             KeyInput('X', 'PRESS', self.handle_delete),
             KeyInput('X', 'RELEASE', self.handle_delete_end),
-            KeyInput('TAB', 'PRESS', lambda: self.handle_cycle_module(-1), ctrl=True),
-            KeyInput('TAB', 'PRESS', lambda: self.handle_cycle_module(1), None),
             KeyInput('G', 'PRESS', self.handle_grab, None),
             KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), ctrl=True),
             KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(1, 0, 0), ctrl=True),
@@ -158,22 +125,12 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1)),
             KeyInput('C', 'PRESS', self.handle_copy, ctrl=True),
             KeyInput('V', 'PRESS', self.paste, ctrl=True),
-            KeyInput('B', 'PRESS', self.handle_select),
-            KeyInput('ONE', 'PRESS', lambda: self.set_active_group(0)),
-            KeyInput('TWO', 'PRESS', lambda: self.set_active_group(1)),
-            KeyInput('THREE', 'PRESS', lambda: self.set_active_group(2)),
-            KeyInput('FOUR', 'PRESS', lambda: self.set_active_group(3)),
-            KeyInput('FIVE', 'PRESS', lambda: self.set_active_group(4)),
-            KeyInput('SIX', 'PRESS', lambda: self.set_active_group(5)),
-            KeyInput('SEVEN', 'PRESS', lambda: self.set_active_group(6)),
-            KeyInput('EIGHT', 'PRESS', lambda: self.set_active_group(7)),
-            KeyInput('NINE', 'PRESS', lambda: self.set_active_group(8)),
-            KeyInput('ZERO', 'PRESS', lambda: self.set_active_group(9))
+            KeyInput('B', 'PRESS', self.handle_select)
         ]
 
     @classmethod
     def poll(cls, context):
-        return not ModularBuildingMode.running_modal
+        return not T3DPaintMode.running_modal
 
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -189,12 +146,12 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
             return {'CANCELLED'}
 
     def invoke(self, context, event):
-        if ModularBuildingMode.running_modal: return {'CANCELLED'}
-        ModularBuildingMode.running_modal = True
-        settings = context.scene.mbt
+        if T3DPaintMode.running_modal: return {'CANCELLED'}
+        T3DPaintMode.running_modal = True
+        settings = context.scene.t3d
         if context.area.type == 'VIEW_3D':
             # init
-            self.init(settings.metadata_path)
+            self.init()
             self.init_handlers(context)
             return {'RUNNING_MODAL'}
         else:
@@ -215,7 +172,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
     def on_quit(self):
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
-        ModularBuildingMode.running_modal = False
+        T3DPaintMode.running_modal = False
 
     def handle_quit(self):
         if self.state.grab:
@@ -227,7 +184,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         else:
             raise QuitError()
 
-    # it's weird that the state management is split between ModularBuildingTool and ModularBuildingMode like this...
+    # it's weird that the state management is split between Tilemap3D and PaintMode like this...
     def handle_paint(self):
         if self.state.grab:
             # behaves same as space
@@ -265,24 +222,6 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
         self.state.delete = False
         self.state.clear = False
 
-    def handle_cycle_module_group(self):
-        if len(self.module_groups) <= 1:
-            self.report({'INFO'}, 'no more module groups to cycle to')
-        else:
-            self.active_group += 1
-            self.active_group %= len(self.module_groups)
-
-    def handle_cycle_module(self, i):
-        act_g = self.get_active_group()
-        if act_g is not None:
-            if len(act_g.modules) <= i:
-                self.report({'INFO'}, 'no more modules to cycle to')
-            else:
-                act_g.active += i
-                act_g.active %= len(act_g.modules)
-        else:
-            self.report({'INFO'}, 'no more modules to cycle to')
-
     def handle_grab(self):
         if not self.state.grab:
             self.start_grab()
@@ -291,7 +230,7 @@ class ModularBuildingMode(ModularBuildingTool, Operator):
 
     def handle_copy(self):
         self.copy()
-        self.report({'INFO'}, '({}) modules copied to clipboard'.format(len(self.clipboard)))
+        self.report({'INFO'}, '({}) tiles copied to clipboard'.format(len(self.clipboard)))
 
     def handle_select(self):
         if not self.state.select:
@@ -340,35 +279,15 @@ def draw_callback_2d(self, context):
     text_cursor.x = 20
     text_cursor.y = 140
 
-    group = self.get_active_group()
+    group = self.get_active_tile3d()
     if group is not None:
-        group.painter.draw_ui()
-    else:
-        draw_text_2d("No modules found", size=15, color=RED)
+        draw_text_2d(group, size=15, color=GREY)
 
     # info
     vec3_str = "{}, {}, {}".format(int(self.cursor_pos.x), int(self.cursor_pos.y), int(self.cursor_pos.z))
     draw_text_2d("cursor pos: " + vec3_str, size=15, color=GREY)
 
     restore_gl_defaults()
-
-class SetModuleTypeOperator(Operator):
-    """Set module type of selected objects"""
-    bl_idname = "view3d.set_module_type"
-    bl_label = "Set Module Type"
-
-    @classmethod
-    def poll(self, context):
-        return context.object is not None
-
-    def execute(self, context):
-        mbt = context.scene.mbt
-        selected = context.selected_objects
-        for obj in selected:
-            data = obj.data
-            if data is not None:
-                data[CUSTOM_PROPERTY_TYPE] = mbt.module_type
-        return {'FINISHED'}
 
 class ConnectObjects(Operator):
     """Connect two objects with constraints utility"""
@@ -390,20 +309,20 @@ class ConnectObjects(Operator):
         copy_rotation.use_offset = True
         return {'FINISHED'}
 
-class LinkAllMesh(Operator):
-    """Link all meshes from module library"""
-    bl_idname = "view3d.link_all_mesh"
+class LinkTile3DLibrary(Operator):
+    """Link all groups from linked library"""
+    bl_idname = "view3d.link_tile3d_library"
     bl_label = "Link"
 
     def execute(self, context):
-        mbt = context.scene.mbt
-        with bpy.data.libraries.load(mbt.module_library_path, link=True) as (data_src, data_dst):
-            # link meshes
-            data_dst.meshes = data_src.meshes
-            self.report({'INFO'}, 'linked {} meshes'.format(len(data_src.meshes)))
+        t3d = context.scene.t3d
+        with bpy.data.libraries.load(t3d.tile3d_library_path, link=True) as (data_src, data_dst):
+            # link groups
+            data_dst.groups = data_src.groups
+            self.report({'INFO'}, 'linked {} groups'.format(len(data_src.groups)))
             # link src scene. assume only has one
             scene = data_src.scenes[0]
-            data_dst.scenes = [scene]
+            data_dst.scenes = [scene] # will this link all groups anyway?
         return {'FINISHED'}
 
 class Selection(Header):
@@ -438,172 +357,52 @@ class Selection(Header):
                     if obj not in selected:
                         bpy.selection.remove(obj)
 
-class SmartMove(Operator):
-    bl_idname = "view3d.smart_move"
-    bl_label = "Smart Move"
-
-    running_modal = False
-    bi = 1.0  # big increment
-    si = 0.1  # small increment
-
-    # todo override header (hide gizmo?)
-
-    def __init__(self):
-        self.original_pos = None
-        self.original_rot = None
-        self.last_rot = None
-        self.input_map = [
-            KeyInput('ESC', 'PRESS', self.handle_cancel),
-            KeyInput('RIGHTMOUSE', 'PRESS', self.handle_cancel),
-            KeyInput('RET', 'PRESS', self.handle_commit),
-            KeyInput('LEFTMOUSE', 'PRESS', self.handle_commit),
-            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-self.si, 0, 0), ctrl=True, shift=True),
-            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(self.si, 0, 0), ctrl=True, shift=True),
-            KeyInput('UP_ARROW', 'PRESS', lambda: self.translate(0, 0, self.si), ctrl=True, shift=True),
-            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -self.si), ctrl=True, shift=True),
-            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-self.bi, 0, 0), ctrl=True),
-            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(self.bi, 0, 0), ctrl=True),
-            KeyInput('UP_ARROW', 'PRESS', lambda: self.translate(0, 0, self.bi), ctrl=True),
-            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.translate(0, 0, -self.bi), ctrl=True),
-            # KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-1, 0, repeat=4), shift=True),
-            # KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(1, 0, repeat=4), shift=True),
-            # KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1, repeat=4), shift=True),
-            # KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1, repeat=4), shift=True),
-            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-self.si, 0), shift=True),
-            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(self.si, 0), shift=True),
-            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, self.si), shift=True),
-            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -self.si), shift=True),
-            KeyInput('LEFT_ARROW', 'PRESS', lambda: self.smart_move(-self.bi, 0)),
-            KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.smart_move(self.bi, 0)),
-            KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, self.bi)),
-            KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -self.bi)),
-        ]
-
-    @classmethod
-    def poll(cls, context):
-        return context.object is not None
-
-    def invoke(self, context, event):
-        if SmartMove.running_modal: return {'CANCELLED'}
-        if context.area.type == 'VIEW_3D':
-            self.init()
-            return {'RUNNING_MODAL'}
-        else:
-            self.report({'WARNING'}, "View3D not found, cannot run operator")
-            return {'CANCELLED'}
-
-    def modal(self, context, event):
-        context.area.tag_redraw()
-        try:
-            return self.handle_input(event)
-        except QuitError:
-            return self.quit()
-        except:
-            exc_type, exc_msg, exc_tb = sys.exc_info()
-            logging.error("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
-            return self.quit()
-
-    def quit(self):
-        SmartMove.running_modal = False
-        return {'CANCELLED'}
-
-    def init(self):
-        SmartMove.running_modal = True
-        bpy.context.window_manager.modal_handler_add(self)
-        self.original_pos = bpy.context.object.location.copy()
-        self.original_rot = bpy.context.object.rotation_euler.copy()
-
-    def handle_input(self, event):
-        for keyinput in self.input_map:
-            if (keyinput.shift and not event.shift or
-                keyinput.ctrl and not event.ctrl):
-                continue
-            if keyinput.type == event.type and keyinput.value == event.value:
-                keyinput.func()
-                return {'RUNNING_MODAL'}
-        return {'PASS_THROUGH'}
-
-    def handle_cancel(self):
-        bpy.context.object.location = self.original_pos
-        bpy.context.object.rotation_euler = self.original_rot
-        raise QuitError()
-
-    def handle_commit(self):
-        raise QuitError()
-
-    def translate(self, x, y, z):
-        vec = Vector((x, y, z))
-        vec.rotate(bpy.context.object.rotation_euler)
-        bpy.ops.transform.translate(value=vec)
-
-    def smart_move(self, x, y, repeat=1):
-        # move in x or y, but only if already facing that direction
-        mag = max(abs(x), abs(y))
-        z = normalized_XY_to_Zrot_rad(x, y)
-        rot = Euler((0.0, 0.0, z))
-        # obj_rot = bpy.context.object.rotation_quaternion
-        obj_rot = bpy.context.object.rotation_euler.to_quaternion()  # wtf
-        dif = obj_rot.rotation_difference(rot.to_quaternion())
-        if dif.angle < 0.01:
-            # translate
-            vec = Vector((0.0, mag, 0.0))
-            vec.rotate(obj_rot)
-            for i in range(repeat):
-                bpy.ops.transform.translate(value=vec)
-        else:
-            # rotate
-            bpy.context.object.rotation_euler = rot
-
-class SetActiveModule(Operator):
+class SetActiveTile3D(Operator):
+    # we need this because modal operator only works for one window
     bl_idname = "view_3d.object_picker"
     bl_label = "Set Active Module"
 
-    group = None
-    module_ = None
+    tile3d = None
 
     @classmethod
     def poll(cls, context):
-        if not ModularBuildingMode.running_modal: return False
+        if not T3DPaintMode.running_modal: return False
         obj = context.object
         if obj is None: return False
-        data = obj.data
-        if data is None: return False
-        is_module = CUSTOM_PROPERTY_TYPE in data
-        if not is_module: return False
-        SetActiveModule.group = data[CUSTOM_PROPERTY_TYPE]
-        SetActiveModule.module_ = data.name
+        # assume is group instance
+        group = get_group_name(obj)
+        if group is None:
+            # else might be the linked object
+            group = get_first_group_name(obj)
+        SetActiveTile3D.tile3d = group
         return True
 
     def execute(self, context):
-        mbt = ModularBuildingTool.instance
-        mbt.set_active_group_name(self.group)
-        mbt.set_active_module_name(self.module_)
+        t3d = Tilemap3D.instance
+        t3d.set_active_tile3d(self.tile3d)
         update_3dviews()
         return {'FINISHED'}
 
 def register():
     bpy.utils.register_module(__name__)
-    bpy.types.Scene.mbt = PointerProperty(type=ModularBuildingToolProperties)
+    bpy.types.Scene.t3d = PointerProperty(type=Tilemap3DProperties)
 
     # keymap
     wm = bpy.context.window_manager
     if wm.keyconfigs.addon is None: return
     km = wm.keyconfigs.addon.keymaps.new(name='Object Mode', space_type='EMPTY')
-    km.keymap_items.new(SmartMove.bl_idname, 'K', 'PRESS')
-    km.keymap_items.new(SetActiveModule.bl_idname, 'E', 'PRESS')
-
+    km.keymap_items.new(SetActiveTile3D.bl_idname, 'S', 'PRESS')
     addon_keymaps.append(km)
 
 def unregister():
     bpy.utils.unregister_module(__name__)
-    bpy.types.Scene.mbt = None
+    bpy.types.Scene.t3d = None
 
     # keymap
     wm = bpy.context.window_manager
     if wm.keyconfigs.addon is None: return
     for km in addon_keymaps:
         wm.keyconfigs.addon.keymaps.remove(km)
-
     addon_keymaps.clear()
 
 if __name__ == "__main__":

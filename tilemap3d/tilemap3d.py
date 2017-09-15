@@ -48,8 +48,8 @@ YELLOW = (1.0, 1.0, 0.0, 1.0)
 PURPLE = (1.0, 0.0, 1.0, 1.0)
 GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
-CUSTOM_PROPERTY_TYPE = "MBT_type"
-CUSTOM_PROPERTY_TILE_SIZE_Z = "MBT_tile_size_z"
+CUSTOM_PROPERTY_TYPE = "T3D_type"
+CUSTOM_PROPERTY_TILE_SIZE_Z = "T3D_tile_size_z"
 METADATA_WEIGHTS = "weights"
 METADATA_CUSTOM_ROOMS = "custom_rooms"
 METADATA_CUSTOM_GROUPS = "custom_groups"
@@ -165,13 +165,18 @@ def delete_object(obj):
 def delete_objects(objects):
     # use this when you can, saves calling update_3dview
     if len(objects) == 0: return
-    for m in objects:
-        bpy.data.objects.remove(m, True)
+    for obj in objects:
+        bpy.data.objects.remove(obj, True)
     logging.debug("deleted {} objects".format(len(objects)))
     update_3dviews()
 
-def get_group_name(meshdata):
-    return meshdata[CUSTOM_PROPERTY_TYPE]
+def get_group_name(obj):
+    if obj is not None and obj.dupli_group is not None:
+        return obj.dupli_group.name
+
+def get_first_group_name(obj):
+    if len(obj.users_group) > 0:
+        return obj.users_group[0].name
 
 def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
     a = Vector((x_min, y_min, z_min))
@@ -203,197 +208,141 @@ def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
 def log_created(obj):
     logging.debug("created {}".format(str(obj)))
 
-class ModuleFinder:
-    mbt = None
+class Tile3DFinder:
+    t3d = None
 
     def __init__(self):
         self.kd = None
         self.childs = None
 
         # init
-        self.childs = self.mbt.root_obj.children
+        self.childs = self.t3d.root_obj.children
         size = len(self.childs)
         self.kd = mathutils.kdtree.KDTree(size)
 
         for i, child in enumerate(self.childs):
             #self.kd.insert(child.location, i)
-            self.kd.insert(self.mbt.get_tilepos(child), i)
+            self.kd.insert(self.t3d.get_tilepos(child), i)
         self.kd.balance()
 
-    def get_modules_at(self, pos):
+    def get_tiles_at(self, pos):
         return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
-
-class Module:
-    def __init__(self, data, name, group_name):
-        self.data = data
-        self.name = name
-        self.group_name = group_name
-
-        log_created(self)
-
-    def __str__(self):
-        return "{} {}".format(type(self).__name__, self.name)
-
-class ModuleGroup:
-    def __init__(self, name, painter, thin=False):
-        self.name = name
-        self.painter = painter
-        self.active = -1
-        self.modules = []
-        self.thin = thin
-
-        # init
-        self.painter.init(self)
-        log_created(self)
-
-    def __str__(self):
-        return "{} {}".format(type(self).__name__, self.name)
-
-    def active_module(self):
-        if self.active >= 0:
-            return self.modules[self.active]
-
-    def add_module(self, module_):
-        self.active = 0
-        self.modules.append(module_)
 
 class RestoreCursorPos:
     # lets us edit the cursor pos and restore original value nicely
-    def __init__(self, mbt):
-        self.mbt = mbt
+    def __init__(self, t3d):
+        self.t3d = t3d
         self.original_pos = None
 
     def __enter__(self):
-        self.original_pos = self.mbt.cursor_pos
+        self.original_pos = self.t3d.cursor_pos
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.mbt.cursor_pos = self.original_pos
+        self.t3d.cursor_pos = self.original_pos
 
 class Painter:
-    mbt = None
+    t3d = None
 
     def __init__(self):
-        self.group = None
-
-    def __str__(self):
-        group_name = self.group.name if self.group else '""'
-        return "{} for {}".format(type(self).__name__, group_name)
-
-    def init(self, group):
-        self.group = group
         log_created(self)
 
     def paint(self):
-        module_ = self.group.active_module()
-        if module_ is not None:
-            self.mbt.create_obj(module_.data)
+        tile3d = self.t3d.get_active_tile3d()
+        if tile3d is not None:
+            self.t3d.paint_tile(tile3d)
 
     def delete(self):
-        # delete only modules of same type
-        match = [x for x in self.mbt.get_modules() if get_group_name(x.data) == self.group.name]
-        if self.group.thin:
-            # only delete if facing same as cursor rot
-            for m in match:
-                if round(math.degrees(m.rotation_euler.z)) == self.mbt.cursor_rot:
-                    delete_object(m)
-                    break
-        else:
-            if len(match) > 0:
-                delete_object(match[0])  # should only be one
+        tiles = self.t3d.get_tiles()
+        delete_objects(tiles)
 
     def clear(self):
-        self.mbt.clear()
+        self.t3d.clear()
 
-    def draw_ui(self):
-        module_ = self.group.active_module()
-        if module_ is not None:
-            draw_text_2d(module_.name, size=15)
-        draw_text_2d(self.group.name, size=25)
 
-class RoomPainter(Painter):
+class AutoTilingPainter(Painter):
     instance = None  # singleton
 
     def __init__(self):
         super().__init__()
-        RoomPainter.instance = self
+        AutoTilingPainter.instance = self
         self.custom_rooms = {}
         self.room_modes = [
-            (self.active_module, "Active Module"),
+            (self.active_tile3d, "Active Tile3D"),
             (self.weighted_random, "Weighted Random"),
             (self.dither, "Dither")
         ]
 
     def init(self, group):
         super().init(group)
-        self.group.modules = [None] * 3  # hack
+        self.group.tiles = [None] * 3  # hack
 
     def paint(self):
         self.room_paint()
         self.repaint_adjacent()  # this is why it is so slow todo paint(width, height)
 
     def delete(self):
-        self.mbt.clear()
+        self.t3d.clear()
         self.repaint_adjacent()
 
     def room_paint(self):
-        self.mbt.clear()
-        occupied = self.mbt.adjacent_occupied()
-        original_rot = self.mbt.cursor_rot
+        self.t3d.clear()
+        occupied = self.t3d.adjacent_occupied()
+        original_rot = self.t3d.cursor_rot
         # paint walls
         for i in range(4):
             if not occupied[i]:
                 vec = ADJACENCY_VECTORS[i]
-                self.mbt.cursor_rot = normalized_XY_to_Zrot(vec.x, vec.y)
-                wall = self.room_get_module("wall")
+                self.t3d.cursor_rot = normalized_XY_to_Zrot(vec.x, vec.y)
+                wall = self.room_get_tile3d("wall")
                 if wall is not None:
-                    self.mbt.create_obj(wall.data)
+                    self.t3d.paint_tile(wall.data)
         # paint floor
         if not occupied[5]:
-            floor = self.room_get_module("floor")
+            floor = self.room_get_tile3d("floor")
             if floor is not None:
-                self.mbt.create_obj(floor.data)
+                self.t3d.paint_tile(floor.data)
         # paint ceiling
         if not occupied[4]:
-            ceiling = self.room_get_module("ceiling")
+            ceiling = self.room_get_tile3d("ceiling")
             if ceiling is not None:
-                self.mbt.create_obj(ceiling.data)
-        self.mbt.cursor_rot = original_rot
+                self.t3d.paint_tile(ceiling.data)
+        self.t3d.cursor_rot = original_rot
 
     def repaint_adjacent(self):
-        with RestoreCursorPos(self.mbt):
-            orig_curs_pos = self.mbt.cursor_pos
-            adjacent_occupied = self.mbt.adjacent_occupied()
+        with RestoreCursorPos(self.t3d):
+            orig_curs_pos = self.t3d.cursor_pos
+            adjacent_occupied = self.t3d.adjacent_occupied()
             for occupied, vec in zip(adjacent_occupied, ADJACENCY_VECTORS):
                 if occupied:
-                    self.mbt.cursor_pos = orig_curs_pos + vec
+                    self.t3d.cursor_pos = orig_curs_pos + vec
                     self.room_paint()
 
-    def room_get_module(self, type_):
+    def room_get_tile3d(self, type_):
         mode_func, mode_name = self.room_modes[self.group.active]
         return mode_func(type_)
 
-    def active_module(self, type_):
-        return self.mbt.module_groups[type_].active_module()
+    def active_tile3d(self, type_):
+        return self.t3d.tile3d_groups[type_].active_tile3d()
 
     def weighted_random(self, type_):
-        if type_ in self.mbt.weight_info:
-            return weighted_choice(self.mbt.weight_info[type_])
+        if type_ in self.t3d.weight_info:
+            return weighted_choice(self.t3d.weight_info[type_])
 
     def dither(self, type_):
-        group = self.mbt.module_groups[type_]
-        if len(group.modules) > 0:
-            idx = int(self.mbt.cursor_pos.x + self.mbt.cursor_pos.y + self.mbt.cursor_pos.z)
-            idx %= len(group.modules)
-            return group.modules[idx]
+        group = self.t3d.tile3d_groups[type_]
+        if len(group.tiles) > 0:
+            idx = int(self.t3d.cursor_pos.x + self.t3d.cursor_pos.y + self.t3d.cursor_pos.z)
+            idx %= len(group.tiles)
+            return group.tiles[idx]
 
     def custom_room(self, custom_room, type_):
-        module_name = custom_room[type_]
-        return self.mbt.modules[module_name]
+        tile3d_name = custom_room[type_]
+        return self.t3d.tiles[tile3d_name]
 
     @staticmethod
     def add_custom_room(name, custom_room):
-        self = RoomPainter.instance
-        self.group.modules.append(None)
+        self = AutoTilingPainter.instance
+        self.group.tiles.append(None)
         self.custom_rooms[name] = custom_room
         self.room_modes.append((lambda type_: self.custom_room(custom_room, type_), name))
 
@@ -402,16 +351,16 @@ class RoomPainter(Painter):
         draw_text_2d(mode_name, size=15, color=YELLOW)
         draw_text_2d("room", size=25, color=YELLOW)
 
-class ModularBuildingModeState:
+class PaintModeState:
     paint = False
     clear = False
     delete = False
     grab = False
     select = False
 
-tilesize = Vector((1.0, 1.0, 1.0))
+# tilesize = Vector((1.0, 1.0, 1.0))
 
-class ModularBuildingTool:
+class Tilemap3D:
     instance = None
 
     def __init__(self, logging_level=logging.INFO):
@@ -419,123 +368,30 @@ class ModularBuildingTool:
         self.metadata = None
         self.root_obj = None
         self.tilesize_z = 1.0
-        self.module_groups = collections.OrderedDict()
-        self.active_group = 0
-        self.modules = {}
+        self.active_tile3d = None
         self.cursor_pos = Vector((0, 0, 0))
         # self.cursor_tilt = 0  # may be useful for slopes (like rollarcoaster tycoon)
         self.cursor_rot = 0
-        self.state = ModularBuildingModeState()
+        self.state = PaintModeState()
         self.select_start_pos = None
         self.select_cube = None
         self.grabbed = []
-        # used to restore the properties of modules when a grab operation is canceled
+        # used to restore the properties of tiles when a grab operation is canceled
         self.original_pos = Vector()
         self.original_rots = []
         self.clipboard = []
         self.clipboard_rots = []
 
         # init
-        ModularBuildingTool.instance = self
-        logging.basicConfig(format='MBT: %(levelname)s: %(message)s', level=logging_level)
-        Painter.mbt = self
-        ModuleFinder.mbt = self
+        Tilemap3D.instance = self
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        Painter.t3d = self
+        Tile3DFinder.t3d = self
+        self.painter = Painter()
 
-    def init(self, metadata_path):
-        use_metadata = metadata_path != ""
-        if use_metadata:
-            try:
-                self.init_metadata(metadata_path)
-            except FileNotFoundError:
-                self.error("metadata file not found {}".format(metadata_path))
-                use_metadata = False
-            except json.decoder.JSONDecodeError as error:
-                self.error('invalid json {}'.format(metadata_path))
-                print(error)
-                use_metadata = False
-        self.init_module_groups()
-        self.init_modules()
-        if use_metadata:
-            try:
-                self.init_weights()
-                self.init_custom_rooms()
-                self.init_custom_groups()
-            except (KeyError, ValueError, AttributeError) as error:
-                self.error('metadata format error {}'.format(metadata_path))
-                print(error)
+    def init(self):
         self.init_root_obj()
         self.construct_select_cube()
-
-    def init_metadata(self, metadata_path):
-        if metadata_path.startswith('//'):
-            metadata_path = metadata_path[2:]  # not sure if this is always right
-        metadata_path = os.path.abspath(metadata_path)
-        with open(metadata_path) as metadata_file:
-            self.metadata = json.load(metadata_file)
-        logging.debug("initialized metadata")
-
-    def init_module_groups(self):
-        # initialize modules list
-        # NOTE: would need to override this function if adding custom painter
-        self.module_groups['room'] = ModuleGroup("room", RoomPainter())
-        self.module_groups['wall'] = ModuleGroup('wall', Painter(), thin=True)
-        self.module_groups['floor'] = ModuleGroup('floor', Painter())
-        self.module_groups['ceiling'] = ModuleGroup('ceiling', Painter())
-        logging.debug("initialized module groups")
-
-    def init_modules(self):
-        for mesh in bpy.data.meshes:
-            # get type from custom property
-            if CUSTOM_PROPERTY_TYPE not in mesh:
-                continue
-            group_name = get_group_name(mesh)
-            try:
-                group = self.module_groups[group_name]
-            except KeyError:
-                # create
-                group = ModuleGroup(group_name, Painter())
-                self.add_module_group(group)
-            module_ = Module(mesh, mesh.name, group_name)
-            self.add_module(module_)
-            group.add_module(module_)
-        logging.debug("initilized modules")
-
-    def init_weights(self):
-        # used for generators
-        if METADATA_WEIGHTS not in self.metadata: return
-        metadata_weights = self.metadata[METADATA_WEIGHTS]
-        for mesh_name, weight in metadata_weights.items():
-            try:
-                mesh = self.modules[mesh_name]
-            except KeyError:
-                logging.warning('invalid weight. mesh not found "{}"'.format(mesh_name))
-                continue
-            g_name = mesh.group_name
-            try:
-                self.weight_info[g_name].append((mesh, weight))
-            except KeyError:
-                self.weight_info[g_name] = [(mesh, weight)]
-        logging.debug("initialized weights")
-
-    def init_custom_rooms(self):
-        if METADATA_CUSTOM_ROOMS not in self.metadata: return
-        metadata_custom_rooms = self.metadata[METADATA_CUSTOM_ROOMS]
-        for name, value in metadata_custom_rooms.items():
-            RoomPainter.add_custom_room(name, value)
-        logging.debug("initialized custom rooms")
-
-    def init_custom_groups(self):
-        custom_groups = {}
-        if METADATA_CUSTOM_GROUPS in self.metadata:
-            custom_groups = self.metadata[METADATA_CUSTOM_GROUPS]
-        for name, group_prop in custom_groups.items():
-            if name not in self.module_groups:
-                logging.warning("custom groups: {} not a module group".format(name))
-                continue
-            thin = get_key(group_prop, 'thin', False)
-            group = self.module_groups[name]
-            group.thin = thin
-        logging.debug("initialized custom groups")
 
     def init_root_obj(self):
         self.root_obj = bpy.context.object
@@ -550,39 +406,15 @@ class ModularBuildingTool:
     def error(self, msg):
         logging.error(msg)
 
-    def set_active_group_name(self, name):
-        if name not in self.module_groups: return
-        keys = list(self.module_groups.keys())
-        self.active_group = keys.index(name)
+    def set_active_tile3d(self, group):
+        self.active_tile3d = group
 
-    def set_active_module_name(self, name):
-        group = self.get_active_group()
-        for i, module_ in enumerate(group.modules):
-            if module_.name == name:
-                group.active = i
+    def get_active_tile3d(self):
+        return self.active_tile3d
 
-    def add_module_group(self, group):
-        self.module_groups[group.name] = group
-
-    def add_module(self, module_):
-        self.modules[module_.name] = module_
-
-    def get_modules(self):
-        finder = ModuleFinder()
-        return finder.get_modules_at(self.cursor_pos)
-
-    def set_active_group(self, i):
-        self.active_group = mid(0, i, len(self.module_groups) - 1)
-
-    def get_active_group(self):
-        if len(self.module_groups) > 0:
-            values = list(self.module_groups.values())
-            return values[self.active_group]
-
-    def get_active_module(self):
-        act_g = self.get_active_group()
-        if act_g is not None:
-            return act_g.modules[act_g.active]
+    def get_tiles(self):
+        finder = Tile3DFinder()
+        return finder.get_tiles_at(self.cursor_pos)
 
     def get_tilepos(self, obj):
         vec = obj.location.copy()
@@ -595,20 +427,19 @@ class ModularBuildingTool:
         obj.location = vec
 
     def clear(self):
-        delete_objects(self.get_modules())
+        delete_objects(self.get_tiles())
 
     def adjacent_occupied(self):
-        finder = ModuleFinder()
-        return [len(finder.get_modules_at(self.cursor_pos + vec)) > 0 for vec in ADJACENCY_VECTORS]
+        finder = Tile3DFinder()
+        return [len(finder.get_tiles_at(self.cursor_pos + vec)) > 0 for vec in ADJACENCY_VECTORS]
 
     def cdraw(self):
-        group = self.get_active_group()
         if self.state.paint:
-            group.painter.paint()
+            self.painter.paint()
         elif self.state.delete:
-            group.painter.delete()
+            self.painter.delete()
         elif self.state.clear:
-            group.painter.clear()
+            self.painter.clear()
         self.construct_select_cube()
 
     def rotate(self, rot):
@@ -643,34 +474,21 @@ class ModularBuildingTool:
         else:
             self.rotate(rot - self.cursor_rot)
 
-    def on_paint(self, module_):
-        self.on_paint_at(self.cursor_pos, self.cursor_rot, module_)
+    def on_paint(self):
+        self.on_paint_at(self.cursor_pos)
 
-    def on_paint_at(self, pos, rot, module_):
-        # call this when creating or moving a module. it replaces overlapping modules
+    def on_paint_at(self, pos):
+        # call this when creating or moving a tile3d. it replaces overlapping tiles
         # 'blend' would be better name? combines src with dst
         to_delete = []
-        g_to = get_group_name(module_.data)
-        finder = ModuleFinder()
-        dest_modules = finder.get_modules_at(pos)
-        for x in dest_modules:
-            g_from = get_group_name(x.data)
-            if g_to == g_from and x != module_:
-                # module is already occupied with module of same group, may have to delete
-                g = self.module_groups[g_to]
-                if g.thin:
-                    # only delete if x has same rotation as m (rounded to nearest ordinal direction...)
-                    if rot_conv(x.rotation_euler.z) != rot:
-                        continue  # don't delete existing
-                # delete existing module
-                to_delete.append(x)
-                break  # should only be one
-        delete_objects(to_delete)
+        finder = Tile3DFinder()
+        tiles = finder.get_tiles_at(pos)
+        delete_objects(tiles) # only one tile per cell now
 
     def start_grab(self):
         logging.debug("start grab")
         self.state.grab = True
-        self.grabbed = self.get_modules()
+        self.grabbed = self.get_tiles()
         self.original_pos = self.cursor_pos
         for x in self.grabbed:
             self.original_rots.append(x.rotation_euler.z)
@@ -687,50 +505,46 @@ class ModularBuildingTool:
                 self.set_tilepos(o, self.original_pos)
                 o.rotation_euler.z = rot
         else:
-            # combine with modules at destination
+            # combine with tiles at destination
             pos = self.cursor_pos  # assume objs are at cursor pos (invalid if was multi-cell grab)
             for g in self.grabbed:
                 self.on_paint_at(pos, rot_conv(g.rotation_euler.z), g)
         self.grabbed.clear()
         self.original_rots.clear()
 
-    def create_cube(self, position=None, rotz=None, scale=None):
-        bpy.ops.mesh.primitive_cube_add()
-        cube = bpy.context.scene.objects.active
+    def create_tile(self, group, position=None, rotz=None, scale=None):
+        bpy.ops.object.group_instance_add(group=group)
+        tile3d = bpy.context.scene.objects.active
         if position is not None:
             # cube.location = position
-            self.set_tilepos(cube, position)
+            self.set_tilepos(tile3d, position)
         if rotz is not None:
-            cube.rotation_euler = mathutils.Euler((0, 0, math.radians(rotz)))
+            tile3d.rotation_euler = mathutils.Euler((0, 0, math.radians(rotz)))
         if scale is not None:
-            cube.scale = scale
-        return cube
+            tile3d.scale = scale
+        return tile3d
 
-    def create_obj(self, data):
+    def paint_tile(self, group):
         # creates object with data at cursor
         # create a cube then change it to a whatever
-        obj = self.create_cube(position=self.cursor_pos, rotz=self.cursor_rot)
-        cube = obj.data
-        obj.data = data
-        obj.name = data.name
-        bpy.data.meshes.remove(cube, True)  # clean up the cube mesh data
+        self.on_paint()
+        obj = self.create_tile(group, position=self.cursor_pos, rotz=self.cursor_rot)
         obj.parent = self.root_obj
-        logging.debug("created object {}".format(data.name))
-        self.on_paint(obj)
+        logging.debug("created object {}".format(obj.name))
         return obj
 
     def copy(self):
-        modules = self.get_modules()
-        self.clipboard = [obj.data for obj in modules]
+        tiles = self.get_tiles()
+        self.clipboard = [obj.data for obj in tiles]
         self.clipboard_rots.clear()
-        for x in modules:
+        for x in tiles:
             self.clipboard_rots.append(x.rotation_euler.z)
         logging.debug("copied {} objects to clipboard".format(len(self.clipboard)))
 
     def paste(self):
         for x in range(len(self.clipboard)):
             data = self.clipboard[x]
-            new = self.create_obj(data)
+            new = self.paint_tile(data)
             new.rotation_euler.z = self.clipboard_rots[x]
         logging.debug("pasted {} objects".format(len(self.clipboard)))
 
@@ -753,7 +567,7 @@ class ModularBuildingTool:
         self.state.select = False
         self.construct_select_cube()
 
-    # todo all select cube stuff should go in ModularBuildingMode? (because UI)
+    # todo all select cube stuff should go in PaintMode? (because UI)
     def construct_select_cube(self):
         if self.state.select:
             cube_min, cube_max = self.select_cube_bounds()

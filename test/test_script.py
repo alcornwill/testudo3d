@@ -4,7 +4,7 @@ import os
 import sys
 
 tests = {}
-mbt = None
+t3d = None
 RESULTS_DIR = "results"
 # NOTE: requires blender in PATH
 COMMAND ='blender --background debug.blend --python test_script.py -- --test {}'
@@ -12,13 +12,13 @@ COMMAND ='blender --background debug.blend --python test_script.py -- --test {}'
 def draw_pixel(x, y):
     # noinspection PyUnresolvedReferences
     from mathutils import Vector
-    mbt.cursor_pos = Vector((x, y, 0.0))
-    mbt.paint()
+    t3d.cursor_pos = Vector((x, y, 0.0))
+    t3d.paint()
 
 def circle(radius):
-    # todo this could be MBT brush
-    mbt.state.paint = True
-    orig_pos = mbt.cursor_pos
+    # todo this could be T3D brush
+    t3d.state.paint = True
+    orig_pos = t3d.cursor_pos
     x0 = orig_pos.x
     y0 = orig_pos.y
     x = radius
@@ -42,7 +42,7 @@ def circle(radius):
             x -= 1
             err -= 2*x + 1
 
-class MbtTest:
+class T3DTest:
     name = None
     save_blend = False
     metadata_path = None
@@ -62,9 +62,9 @@ class MbtTest:
         # wow this is so much nicer without all the try/except...
         import logging
         import tilemap3d
-        global mbt
-        mbt = tilemap3d.ModularBuildingTool(logging_level=logging.DEBUG)
-        mbt.init(self.metadata_path)
+        global t3d
+        t3d = tilemap3d.Tilemap3D(logging_level=logging.DEBUG)
+        t3d.init(self.metadata_path)
 
     def logic(self):
         raise NotImplementedError()
@@ -77,17 +77,17 @@ class MbtTest:
             blend_path = os.path.join(RESULTS_DIR, self.name + ".blend")
             bpy.ops.wm.save_as_mainfile(filepath=blend_path, relative_remap=False)
 
-class PaintTest(MbtTest):
+class PaintTest(T3DTest):
     name = "paint_test"
     save_blend = True
     metadata_path = "metadata.json"
 
     def logic(self):
         # paint something
-        mbt.state.paint = True
-        mbt.translate(0, 1, 0)
+        t3d.state.paint = True
+        t3d.translate(0, 1, 0)
 
-class CircleTest(MbtTest):
+class CircleTest(T3DTest):
     name = "circle_test"
     save_blend = True
     metadata_path = "metadata.json"
@@ -95,62 +95,62 @@ class CircleTest(MbtTest):
     def logic(self):
         circle(radius=8)
 
-class CombinedTest(MbtTest):
+class CombinedTest(T3DTest):
     name = "combined_test"
     save_blend = True
     metadata_path = "metadata.json"
 
     def logic(self):
-        # for each module and module group, test features
-        for i in range(len(mbt.module_groups)):
-            mbt.active_group = i
-            group = mbt.get_active_group()
-            for j in range(len(group.modules)):
+        # for each tile3d and tile3d group, test features
+        for i in range(len(t3d.tile3d_groups)):
+            t3d.active_group = i
+            group = t3d.get_active_group()
+            for j in range(len(group.tiles)):
                 group.active = j
 
                 # paint
-                mbt.translate(0, 1, 0)
-                mbt.paint()
-                mbt.translate(0, -1, 0)
+                t3d.translate(0, 1, 0)
+                t3d.paint()
+                t3d.translate(0, -1, 0)
 
                 # grab
-                mbt.translate(2, 0, 0)
-                mbt.paint()
-                mbt.start_grab()
-                mbt.translate(0, 2, 0)
-                mbt.rotate(90)
-                mbt.end_grab()
-                mbt.rotate(-90)
-                mbt.translate(0, -2, 0)
+                t3d.translate(2, 0, 0)
+                t3d.paint()
+                t3d.start_grab()
+                t3d.translate(0, 2, 0)
+                t3d.rotate(90)
+                t3d.end_grab()
+                t3d.rotate(-90)
+                t3d.translate(0, -2, 0)
 
                 # copy
-                mbt.translate(2, 0, 0)
-                mbt.paint()
-                mbt.copy()
-                mbt.delete()
-                mbt.translate(0, 2, 0)
-                mbt.paste()
-                mbt.translate(0, -2, 0)
+                t3d.translate(2, 0, 0)
+                t3d.paint()
+                t3d.copy()
+                t3d.delete()
+                t3d.translate(0, 2, 0)
+                t3d.paste()
+                t3d.translate(0, -2, 0)
 
                 # box select fill
-                mbt.translate(2, 0, 0)
-                mbt.start_select()
-                mbt.translate(0, 1, 0)
-                mbt.fill()
-                mbt.translate(0, -1, 0)
+                t3d.translate(2, 0, 0)
+                t3d.start_select()
+                t3d.translate(0, 1, 0)
+                t3d.fill()
+                t3d.translate(0, -1, 0)
 
                 # reset
-                mbt.cursor_pos.x = 0
-                mbt.translate(0, 0, 4)
+                t3d.cursor_pos.x = 0
+                t3d.translate(0, 0, 4)
 
             # reset
-            mbt.cursor_pos.x = 0
-            mbt.cursor_pos.z = 0
-            mbt.translate(0, -4, 0)
+            t3d.cursor_pos.x = 0
+            t3d.cursor_pos.z = 0
+            t3d.translate(0, -4, 0)
 
 def get_tests():
     global tests
-    tests = { cls.name: cls for cls in MbtTest.__subclasses__() }
+    tests = { cls.name: cls for cls in T3DTest.__subclasses__() }
 
 def parse_args():
     import argparse

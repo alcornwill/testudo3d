@@ -3,7 +3,7 @@
 from test_script import CircleTest, PaintTest, CombinedTest
 import unittest
 
-class MbtUnitTests(unittest.TestCase):
+class T3DUnitTests(unittest.TestCase):
     # basic functional tests
     def circle_test(self):
         CircleTest().run_in_blender()
