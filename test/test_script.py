@@ -4,7 +4,6 @@ import os
 import sys
 
 tests = {}
-t3d = None
 RESULTS_DIR = "results"
 # NOTE: requires blender in PATH
 COMMAND ='blender --background test.blend --python test_script.py -- --test {}'
@@ -27,7 +26,6 @@ class T3DTest:
         # wow this is so much nicer without all the try/except...
         import logging
         import tilemap3d
-        global t3d
         t3d = tilemap3d.Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
@@ -125,24 +123,6 @@ class TurtleTest(T3DTest):
     name = "turtle_test"
     save_blend = True
 
-    def replace(self, seq, replacementRules, n ):
-        for i in range(n):
-            newseq = ""
-            for element in seq:
-                newseq = newseq + replacementRules.get(element,element)
-            seq = newseq
-        return seq
-
-    def draw(self, commands, rules ):
-        for b in commands:
-            try:
-                rules[b]()
-            except TypeError:
-                try:
-                    draw(rules[b], rules)
-                except:
-                    pass
-
     def execute(self):
         t3d.active_tile3d = 'Suzanne'
         # self.basic()
@@ -178,6 +158,24 @@ class TurtleTest(T3DTest):
         t3d.backward(25)
         t3d.down()
         self.draw(drawing, snake_rules)
+
+    def replace(self, seq, replacementRules, n ):
+        for i in range(n):
+            newseq = ""
+            for element in seq:
+                newseq = newseq + replacementRules.get(element,element)
+            seq = newseq
+        return seq
+
+    def draw(self, commands, rules ):
+        for b in commands:
+            try:
+                rules[b]()
+            except TypeError:
+                try:
+                    draw(rules[b], rules)
+                except:
+                    pass
 
 def get_tests():
     global tests

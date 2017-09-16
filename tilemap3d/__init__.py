@@ -48,8 +48,60 @@ from bpy.types import (
     Header
 )
 from .tilemap3d import *
+from .turtle3d import *
+
+ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
+# ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
+RED = (1.0, 0.0, 0.0, 1.0)
+GREEN = (0.0, 1.0, 0.0, 1.0)
+BLUE = (0.0, 0.0, 1.0, 1.0)
+CYAN = (0.0, 1.0, 1.0, 1.0)
+WHITE = (1.0, 1.0, 1.0, 1.0)
+YELLOW = (1.0, 1.0, 0.0, 1.0)
+PURPLE = (1.0, 0.0, 1.0, 1.0)
+GREY = (0.5, 0.5, 0.5, 1.0)
+FONT_ID = 0  # hmm
 
 addon_keymaps = []
+
+text_cursor = Vec2(0, 0)  # used for UI
+
+def draw_line_3d(start, end):
+    bgl.glVertex3f(*start)
+    bgl.glVertex3f(*end)
+
+def draw_wire(edges, color=WHITE):
+    bgl.glBegin(bgl.GL_LINES)
+    bgl.glColor4f(*color)
+    for start, end in edges:
+        draw_line_3d(start, end)
+    bgl.glEnd()
+
+def draw_poly(poly, color):
+    bgl.glBegin(bgl.GL_POLYGON)
+    bgl.glColor4f(*color)
+    for i in range(len(poly) - 1):
+        draw_line_3d(poly[i], poly[i + 1])
+    bgl.glEnd()
+
+def mat_transform(mat, poly):
+    return [mat * v for v in poly]
+
+def mat_transform_edges(mat, edges):
+    return [(mat * start, mat * end) for start, end in edges]
+
+def draw_text_2d(text, size=20, color=WHITE):
+    bgl.glColor4f(*color)
+    text_cursor.y -= size + 3  # behaves like command line
+    blf.position(FONT_ID, text_cursor.x, text_cursor.y, 0)
+    blf.size(FONT_ID, size, 72)
+    blf.draw(FONT_ID, text)
+
+def restore_gl_defaults():
+    # restore opengl defaults
+    bgl.glLineWidth(1)
+    bgl.glEnable(bgl.GL_DEPTH_TEST)
+    bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
 
 class QuitError(Exception):
     # note: not an error
@@ -102,10 +154,12 @@ class T3DPaintMode(Tilemap3D, Operator):
     running_modal = False
 
     def __init__(self):
-        super().__init__()
+        Tilemap3D.__init__(self)
+        Operator.__init__(self)
         self._handle_3d = None
         self._handle_2d = None
         self.active_scene = None
+        self.select_cube = None
         self.input_map = [
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
@@ -161,14 +215,14 @@ class T3DPaintMode(Tilemap3D, Operator):
             return {'CANCELLED'}
 
     def error(self, msg):
-        super().error(msg)
+        Tilemap3D.error(self, msg)
         self.report({'ERROR'}, msg)
 
     def init_handlers(self, context):
         self.active_scene = context.scene
-        args = (self, context)  # the arguments we pass the the callback
-        self._handle_3d = bpy.types.SpaceView3D.draw_handler_add(draw_callback_3d, args, 'WINDOW', 'POST_VIEW')
-        self._handle_2d = bpy.types.SpaceView3D.draw_handler_add(draw_callback_2d, args, 'WINDOW', 'POST_PIXEL')
+        args = (context,)  # the arguments we pass the the callback
+        self._handle_3d = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_3d, args, 'WINDOW', 'POST_VIEW')
+        self._handle_2d = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_2d, args, 'WINDOW', 'POST_PIXEL')
         context.window_manager.modal_handler_add(self)
 
     def on_quit(self):
@@ -186,7 +240,6 @@ class T3DPaintMode(Tilemap3D, Operator):
         else:
             raise QuitError()
 
-    # it's weird that the state management is split between Tilemap3D and PaintMode like this...
     def handle_paint(self):
         if self.state.grab:
             # behaves same as space
@@ -212,7 +265,6 @@ class T3DPaintMode(Tilemap3D, Operator):
             self.cdraw()
 
     def handle_delete_end(self):
-        self.state.delete = False
         self.state.delete = False
 
     def handle_grab(self):
@@ -243,44 +295,81 @@ class T3DPaintMode(Tilemap3D, Operator):
                 return {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}
 
-def draw_callback_3d(self, context):
-    if context.scene != self.active_scene: return
-    mat_world = self.root_obj.matrix_world
-    mat_scale = Matrix.Scale(self.tilesize_z, 4, Vector((0.0, 0.0, 1.0)))
+    def construct_select_cube(self):
+        if self.state.select:
+            cube_min, cube_max = self.select_cube_bounds()
+        else:
+            cube_min, cube_max = self.cursor.pos, self.cursor.pos
+        self.select_cube = self.construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
+                                                     cube_min.y - 0.5, cube_max.y + 0.5,
+                                                     cube_min.z, cube_max.z + 1.0)
 
-    mat = mat_world * mat_scale
+    @staticmethod
+    def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
+        a = Vector((x_min, y_min, z_min))
+        b = Vector((x_max, y_min, z_min))
+        c = Vector((x_max, y_max, z_min))
+        d = Vector((x_min, y_max, z_min))
+        e = Vector((x_min, y_min, z_max))
+        f = Vector((x_max, y_min, z_max))
+        g = Vector((x_max, y_max, z_max))
+        h = Vector((x_min, y_max, z_max))
 
-    color = YELLOW if self.state.select else WHITE
-    t_cube = mat_transform_edges(mat, self.select_cube)
-    draw_wire(t_cube, color)
+        return [
+            (a, b),
+            (b, c),
+            (c, d),
+            (d, a),
 
-    mat_rot = Matrix.Rotation(math.radians(self.cursor_rot), 4, 'Z')
-    mat_trans = Matrix.Translation(self.cursor_pos)
-    mat = mat_scale * mat_trans * mat_rot
-    mat = mat_world * mat
+            (e, f),
+            (f, g),
+            (g, h),
+            (h, e),
 
-    t_arrow = mat_transform(mat, ARROW)
-    color = PURPLE if not self.state.grab else GREEN
-    bgl.glDisable(bgl.GL_DEPTH_TEST)
-    draw_poly(t_arrow, color)
+            (a, e),
+            (b, f),
+            (c, g),
+            (d, h)
+        ]
 
-    restore_gl_defaults()
+    def draw_callback_3d(self, context):
+        if context.scene != self.active_scene: return
+        mat_world = self.root_obj.matrix_world
+        mat_scale = Matrix.Scale(self.tilesize_z, 4, Vector((0.0, 0.0, 1.0)))
 
-def draw_callback_2d(self, context):
-    if context.scene != self.active_scene: return
-    # draw text
-    text_cursor.x = 20
-    text_cursor.y = 140
+        mat = mat_world * mat_scale
 
-    group = self.get_active_tile3d()
-    if group is not None:
-        draw_text_2d(group, size=15, color=GREY)
+        color = YELLOW if self.state.select else WHITE
+        t_cube = mat_transform_edges(mat, self.select_cube)
+        draw_wire(t_cube, color)
 
-    # info
-    vec3_str = "{}, {}, {}".format(int(self.cursor_pos.x), int(self.cursor_pos.y), int(self.cursor_pos.z))
-    draw_text_2d("cursor pos: " + vec3_str, size=15, color=GREY)
+        mat_rot = Matrix.Rotation(math.radians(self.cursor.rot), 4, 'Z')
+        mat_trans = Matrix.Translation(self.cursor.pos)
+        mat = mat_scale * mat_trans * mat_rot
+        mat = mat_world * mat
 
-    restore_gl_defaults()
+        t_arrow = mat_transform(mat, ARROW)
+        color = PURPLE if not self.state.grab else GREEN
+        bgl.glDisable(bgl.GL_DEPTH_TEST)
+        draw_poly(t_arrow, color)
+
+        restore_gl_defaults()
+
+    def draw_callback_2d(self, context):
+        if context.scene != self.active_scene: return
+        # draw text
+        text_cursor.x = 20
+        text_cursor.y = 140
+
+        tile3d = self.active_tile3d
+        text = tile3d if tile3d else 'No Active Tile'
+        draw_text_2d(text, size=15, color=GREY)
+
+        # info
+        vec3_str = "{}, {}, {}".format(int(self.cursor.pos.x), int(self.cursor.pos.y), int(self.cursor.pos.z))
+        draw_text_2d("cursor pos: " + vec3_str, size=15, color=GREY)
+
+        restore_gl_defaults()
 
 class ConnectObjects(Operator):
     """Connect two objects with constraints utility"""
@@ -371,8 +460,7 @@ class SetActiveTile3D(Operator):
         return True
 
     def execute(self, context):
-        t3d = Tilemap3D.instance
-        t3d.set_active_tile3d(self.tile3d)
+        t3d.active_tile3d = self.tile3d
         update_3dviews()
         return {'FINISHED'}
 

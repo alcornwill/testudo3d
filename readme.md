@@ -1,7 +1,7 @@
-# Tilemap3D (formerly Modular Building Tool)
+# Testudo3D (formerly Modular Building Tool)
 #[VIDEO](https://www.youtube.com/watch?v=4p2CRIq-Aa0)  
-blender addon to add basic 3D tilemap functionality  
-(no auto-tiling yet)
+blender addon with 3D tilemap and turtle graphics API  
+(no auto-tiling yet)  
 
 ### Known Issues
 * copy/paste/grab doesn't work with box select (haven't got round to it) 
