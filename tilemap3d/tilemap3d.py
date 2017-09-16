@@ -24,6 +24,9 @@ def get_key(dict_, key, default=None):
     except KeyError:
         return default
 
+def any(lst):
+    return len(lst) > 0
+
 def mid(a, b, c):
     return min(max(a, b), max(b, c), max(a, c))
 
@@ -100,7 +103,6 @@ def init_object_props():
 
     def set_pos(self, vec):
         vec = vec.copy()
-        floor_vector(vec)
         vec.z *= t3d.tilesize_z
         self.location = vec
 
@@ -124,21 +126,22 @@ class Cursor:
         self.pos = Vector()
         self.rot = 0 # in degrees
 
-class TileData:
+    def get_forward(self):
+        return Matrix.Rotation(radians(t3d.cursor.rot), 4, 'Z')
+
+    forward = property(get_forward)
+
+class GrabData:
     def __init__(self, tile3d):
         self.tile3d = tile3d
-        self.pos = tile3d.pos
-        self.rot = tile3d.rot
+        self.orig_pos = tile3d.pos
+        self.orig_rot = tile3d.rot
 
 class Clipboard:
     def __init__(self, tile3d):
         self.group = tile3d.group
-        self.rot = tile3d.rot
-
-    def paste(self):
-        new = t3d.paint_tile(self.group)
-        new.rot = self.rot
-        return new
+        self.pos_offset = tile3d.pos - t3d.cursor.pos
+        self.rot_offset = tile3d.rot - radians(t3d.cursor.rot)
 
 class Tile3DFinder:
     def __init__(self):
@@ -174,7 +177,6 @@ class Tilemap3D:
         self.state = PaintModeState()
         self.select_start_pos = None
         self.grabbed = None
-        self.original = None # used to restore the properties of tiles when a grab operation is canceled
         self.clipboard = None
 
         # init
@@ -254,19 +256,18 @@ class Tilemap3D:
         self.cursor.rot = self.cursor.rot + rot
         logging.debug("rotated cursor {}".format(rot))
         if self.state.grab:
-            self.grabbed.rot = self.grabbed.rot + radians(rot)
+            self.grabbed.tile3d.rot = self.grabbed.tile3d.rot + radians(rot)
         self.cdraw()
 
     def translate(self, x, y, z):
         # translate the cursor and paint
-        translation = Vector((x, y, z))
-        logging.debug("moved cursor {}".format(translation))
-        mat_rot = Matrix.Rotation(radians(self.cursor.rot), 4, 'Z')
-        translation = mat_rot * translation
-        self.cursor.pos = self.cursor.pos + translation
-        round_vector(self.cursor.pos) # stops floating-point error accumulation
+        vec = Vector((x, y, z))
+        logging.debug("moved cursor {}".format(vec))
+        forward = self.cursor.forward
+        vec = forward * vec
+        self.cursor.pos = self.cursor.pos + vec
         if self.state.grab:
-            self.grabbed.pos = self.grabbed.pos + translation
+            self.grabbed.tile3d.pos = self.grabbed.tile3d.pos + vec
         self.cdraw()
 
     def smart_move(self, x, y, repeat=1):
@@ -280,36 +281,53 @@ class Tilemap3D:
             self.rotate(rot - self.cursor.rot)
 
     def start_grab(self):
+        if self.state.select:
+            # todo grab everything in select bounds
+            pass
         tile3d = self.get_tile3d()
         if tile3d is None: return
         logging.debug("start grab")
         self.state.grab = True
-        self.grabbed = tile3d
-        self.original = TileData(tile3d)
+        self.grabbed = GrabData(tile3d) # todo list
 
     def end_grab(self, cancel=False):
         logging.debug("end grab")
         self.state.grab = False
         if cancel:
-            self.grabbed.pos = self.original.pos
-            self.grabbed.rot = self.original.rot
+            self.grabbed.tile3d.pos = self.grabbed.orig_pos
+            self.grabbed.tile3d.rot = self.grabbed.orig_rot
         else:
-            self.delete(ignore=self.grabbed)  # assume objs are at cursor pos (invalid if was multi-cell grab)
+            self.delete(ignore=self.grabbed.tile3d)
         self.grabbed = None
-        self.original = None
 
     def copy(self):
-        tile3d = self.get_tile3d()
-        if tile3d:
-            self.clipboard = Clipboard(tile3d)
+        if self.state.select:
+            tiles = self.get_selected_tiles()
+            if any(tiles):
+                self.clipboard = [Clipboard(tile3d) for tile3d in tiles]
+            else:
+                self.clipboard = None
+            self.end_select()
         else:
-            self.clipboard = None
-        logging.debug("copied {} objects to clipboard".format("1" if self.clipboard else "0"))
+            tile3d = self.get_tile3d()
+            if tile3d:
+                self.clipboard = [Clipboard(tile3d)]
+            else:
+                self.clipboard = None
+        text = len(self.clipboard) if self.clipboard else "0"
+        logging.debug("copied {} objects to clipboard".format(text))
 
     def paste(self):
         if self.clipboard:
-            self.clipboard.paste()
-        logging.debug("pasted {} objects".format("1" if self.clipboard else "0"))
+            forward = self.cursor.forward
+            orig_pos = self.cursor.pos
+            for item in self.clipboard:
+                vec = forward * item.pos_offset
+                self.cursor.pos = orig_pos + vec
+                new = self.paint_tile(item.group)
+                new.rot = radians(self.cursor.rot) + item.rot_offset
+            self.cursor.pos = orig_pos
+        logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
 
     def start_select(self):
         logging.debug("start box select")
@@ -319,16 +337,30 @@ class Tilemap3D:
 
     def end_select(self):
         logging.debug("end box select")
+        self.select_bounds_func(self.cdraw)
+        self.state.select = False
+        self.construct_select_cube()
+
+    def get_selected_tiles(self):
+        # get tiles within selection bounds
+        tiles = []
+        def get_tiles(tiles):
+            tile3d = t3d.get_tile3d()
+            if tile3d:
+                tiles.append(tile3d)
+        self.select_bounds_func(get_tiles, tiles)
+        return tiles
+
+    def select_bounds_func(self, func, *args):
+        # do func for each cell in select bounds
         orig_cursor_pos = self.cursor.pos
         cube_min, cube_max = self.select_cube_bounds()
         for z in range(int(round(abs(cube_max.z + 1 - cube_min.z)))):
             for y in range(int(round(abs(cube_max.y + 1 - cube_min.y)))):
                 for x in range(int(round(abs(cube_max.x + 1 - cube_min.x)))):
                     self.cursor.pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
-                    self.cdraw()
+                    func(*args)
         self.cursor.pos = orig_cursor_pos
-        self.state.select = False
-        self.construct_select_cube()
 
     def construct_select_cube(self):
         pass

@@ -11,14 +11,13 @@ class Turtle3D(Tilemap3D):
         self.w = 1 # width
 
     def forward(self, i):
-        t = Vector((0, i, 0))
-        mat = Matrix.Rotation(radians(self.cursor.rot), 4, 'Z')
-        t = mat * t
-        round_vector(t)
-        t = self.cursor.pos + t
+        vec = Vector((0, i, 0))
+        forward = self.cursor.forward
+        vec = forward * vec
+        vec = self.cursor.pos + vec
         if self.state.paint:
-            self.line(self.getx(), self.gety(), t.x, t.y)
-        self.goto(t.x, t.y)
+            self.line(self.getx(), self.gety(), vec.x, vec.y)
+        self.goto(vec.x, vec.y)
 
     def backward(self, i):
         self.forward(-i)

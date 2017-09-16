@@ -50,7 +50,7 @@ from bpy.types import (
     Header
 )
 
-from .tilemap3d import update_3dviews
+from .tilemap3d import update_3dviews, get_first_group_name
 from .turtle3d import Turtle3D
 
 class Vec2:
@@ -250,7 +250,6 @@ class T3DPaintMode(Turtle3D, Operator):
 
     def handle_paint(self):
         if self.state.grab:
-            # behaves same as space
             self.end_grab()
         elif self.state.select:
             self.state.paint = True
@@ -283,7 +282,7 @@ class T3DPaintMode(Turtle3D, Operator):
 
     def handle_copy(self):
         self.copy()
-        self.report({'INFO'}, '({}) tiles copied to clipboard'.format("1" if self.clipboard else "0"))
+        self.report({'INFO'}, '({}) tiles copied to clipboard'.format(len(self.clipboard) if self.clipboard else "0"))
 
     def handle_select(self):
         if not self.state.select:
