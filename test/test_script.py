@@ -74,13 +74,21 @@ class CombinedTest(T3DTest):
     def execute(self):
         t3d.active_tile3d = 'Suzanne'
         # test all features
-        # features: paint, clear, copy, paste, grab
-        # also box select, all features should work on multiple cells
+        # features: paint, delete, copy/paste, grab, fill region, clear region, copy/paste region, grab region
 
         # paint
         t3d.translate(0, 1, 0)
         t3d.paint()
         t3d.translate(0, -1, 0)
+
+        # copy/paste
+        t3d.translate(2, 0, 0)
+        t3d.paint()
+        t3d.copy()
+        t3d.delete()
+        t3d.translate(0, 2, 0)
+        t3d.paste()
+        t3d.translate(0, -2, 0)
 
         # grab
         t3d.translate(2, 0, 0)
@@ -92,23 +100,14 @@ class CombinedTest(T3DTest):
         t3d.rotate(-90)
         t3d.translate(0, -2, 0)
 
-        # copy
-        t3d.translate(2, 0, 0)
-        t3d.paint()
-        t3d.copy()
-        t3d.delete()
-        t3d.translate(0, 2, 0)
-        t3d.paste()
-        t3d.translate(0, -2, 0)
-
-        # box select fill
+        # fill region
         t3d.translate(2, 0, 0)
         t3d.start_select()
         t3d.translate(0, 2, 0)
         t3d.fill()
         t3d.translate(0, -2, 0)
 
-        # box select delete
+        # clear region
         t3d.translate(2, 0, 0)
         t3d.start_select()
         t3d.translate(0, 2, 0)
@@ -117,6 +116,37 @@ class CombinedTest(T3DTest):
         t3d.start_select()
         t3d.translate(0, 2, 0)
         t3d.clear()
+        t3d.translate(0, -2, 0)
+
+        # copy/paste region
+        t3d.translate(2, 0, 0)
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.fill()
+        t3d.start_select()
+        t3d.translate(0, -2, 0)
+        t3d.copy()
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.clear()
+        t3d.translate(0, 2, 0)
+        t3d.rotate(90)
+        t3d.paste()
+        t3d.rotate(-90)
+        t3d.translate(0, -4, 0)
+
+        # grab region
+        t3d.translate(3, 0, 0)
+        t3d.start_select()
+        t3d.translate(0, 2, 0)
+        t3d.fill()
+        t3d.start_select()
+        t3d.translate(0, -2, 0)
+        t3d.start_grab()
+        t3d.translate(0, 2, 0)
+        t3d.rotate(90)
+        t3d.end_grab()
+        t3d.rotate(-90)
         t3d.translate(0, -2, 0)
 
 class TurtleTest(T3DTest):

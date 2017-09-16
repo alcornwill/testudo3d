@@ -3,9 +3,6 @@
 blender addon with 3D tilemap and turtle graphics API  
 (no auto-tiling yet)  
 
-### Known Issues
-* copy/paste/grab doesn't work with box select (haven't got round to it) 
-
 ### Controls
 * __cursor keys__ move the 3d cursor arrow
 * __ENTER__ paints a tile

@@ -253,10 +253,19 @@ class Tilemap3D:
 
     def rotate(self, rot):
         # rotate the cursor and paint
-        self.cursor.rot = self.cursor.rot + rot
         logging.debug("rotated cursor {}".format(rot))
         if self.state.grab:
-            self.grabbed.tile3d.rot = self.grabbed.tile3d.rot + radians(rot)
+            mat_rot = Matrix.Rotation(radians(rot), 4, 'Z')
+            for item in self.grabbed:
+                vec = item.tile3d.pos - self.cursor.pos
+                item.tile3d.pos = mat_rot * vec
+                item.tile3d.pos = item.tile3d.pos + self.cursor.pos
+                item.tile3d.rot = item.tile3d.rot + radians(rot)
+            if self.state.select:
+                vec = self.select_start_pos - self.cursor.pos
+                self.select_start_pos = mat_rot * vec
+                self.select_start_pos = self.select_start_pos + self.cursor.pos
+        self.cursor.rot = self.cursor.rot + rot
         self.cdraw()
 
     def translate(self, x, y, z):
@@ -267,7 +276,10 @@ class Tilemap3D:
         vec = forward * vec
         self.cursor.pos = self.cursor.pos + vec
         if self.state.grab:
-            self.grabbed.tile3d.pos = self.grabbed.tile3d.pos + vec
+            for item in self.grabbed:
+                item.tile3d.pos = item.tile3d.pos + vec
+            if self.state.select:
+                self.select_start_pos = self.select_start_pos + vec
         self.cdraw()
 
     def smart_move(self, x, y, repeat=1):
@@ -282,22 +294,32 @@ class Tilemap3D:
 
     def start_grab(self):
         if self.state.select:
-            # todo grab everything in select bounds
-            pass
-        tile3d = self.get_tile3d()
-        if tile3d is None: return
-        logging.debug("start grab")
+            tiles = self.get_selected_tiles()
+            if not any(tiles): return
+            for tile3d in tiles:
+                self.grabbed = [GrabData(tile3d) for tile3d in tiles]
+        else:
+            tile3d = self.get_tile3d()
+            if tile3d is None: return
+            self.grabbed = [GrabData(tile3d)]
         self.state.grab = True
-        self.grabbed = GrabData(tile3d) # todo list
+        logging.debug("start grab")
 
     def end_grab(self, cancel=False):
         logging.debug("end grab")
         self.state.grab = False
+        if self.state.select:
+            self.end_select()
         if cancel:
-            self.grabbed.tile3d.pos = self.grabbed.orig_pos
-            self.grabbed.tile3d.rot = self.grabbed.orig_rot
+            for item in self.grabbed:
+                item.tile3d.pos = item.orig_pos
+                item.tile3d.rot = item.orig_rot
         else:
-            self.delete(ignore=self.grabbed.tile3d)
+            orig_pos = self.cursor.pos
+            for item in self.grabbed:
+                self.cursor.pos = item.tile3d.pos
+                self.delete(ignore=item.tile3d)
+            self.cursor.pos = orig_pos
         self.grabbed = None
 
     def copy(self):
