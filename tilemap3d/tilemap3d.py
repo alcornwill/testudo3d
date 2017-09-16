@@ -1,20 +1,11 @@
 
 import builtins
-import os
 import bpy
-import bgl
-import blf
 import logging
-import collections
 import random
-from math import floor, degrees, radians, atan2
+from math import floor, degrees, radians, atan2, sqrt
 from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.kdtree import KDTree
-
-class Vec2:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
 
 SEARCH_RANGE = 0.01
 CUSTOM_PROPERTY_TILE_SIZE_Z = "T3D_tile_size_z"
@@ -47,7 +38,7 @@ def weighted_choice(choices):
     # shouldn't get here
 
 def magnitude(x, y):
-    return math.sqrt(x ** 2 + y ** 2)
+    return sqrt(x ** 2 + y ** 2)
 
 def normalize(x, y):
     mag = magnitude(x, y)
@@ -93,10 +84,6 @@ def delete_objects(objects):
         bpy.data.objects.remove(obj, True)
     logging.debug("deleted {} objects".format(len(objects)))
     update_3dviews()
-
-def get_group(obj):
-    if obj is not None and obj.dupli_group is not None:
-        return obj.dupli_group.name
 
 def get_first_group_name(obj):
     if len(obj.users_group) > 0:

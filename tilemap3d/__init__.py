@@ -31,7 +31,9 @@ bl_info = {
 
 import sys
 import bpy
-from math import ceil, sqrt
+import bgl
+import blf
+from math import ceil, sqrt, radians
 from mathutils import Vector, Quaternion, Euler, Matrix
 from bpy.props import (
     StringProperty,
@@ -47,8 +49,14 @@ from bpy.types import (
     PropertyGroup,
     Header
 )
-from .tilemap3d import *
-from .turtle3d import *
+
+from .tilemap3d import update_3dviews
+from .turtle3d import Turtle3D
+
+class Vec2:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
 # ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
@@ -115,14 +123,14 @@ class KeyInput:
         self.ctrl = ctrl
         self.shift = shift
 
-class Tilemap3DProperties(PropertyGroup):
+class T3DProperties(PropertyGroup):
     tile3d_library_path = StringProperty(
         name="Tile3D Library Path",
         description="Path to your tile3d library .blend file",
         subtype="FILE_PATH"
     )
 
-class Tilemap3DPanel(Panel):
+class T3DPanel(Panel):
     bl_idname = "view3d.tilemap3d_panel"
     bl_label = "Tilemap3D Panel"
     bl_space_type = 'VIEW_3D'
@@ -146,7 +154,7 @@ class Tilemap3DPanel(Panel):
         layout.separator()
         layout.operator(T3DSetupTilesOperator.bl_idname)
 
-class T3DPaintMode(Tilemap3D, Operator):
+class T3DPaintMode(Turtle3D, Operator):
     """Modal operator for constructing modular scenes"""
     bl_idname = "view3d.t3d_paint_mode"
     bl_label = "T3D Paint Mode"
@@ -154,7 +162,7 @@ class T3DPaintMode(Tilemap3D, Operator):
     running_modal = False
 
     def __init__(self):
-        Tilemap3D.__init__(self)
+        Turtle3D.__init__(self)
         Operator.__init__(self)
         self._handle_3d = None
         self._handle_2d = None
@@ -215,7 +223,7 @@ class T3DPaintMode(Tilemap3D, Operator):
             return {'CANCELLED'}
 
     def error(self, msg):
-        Tilemap3D.error(self, msg)
+        Turtle3D.error(self, msg)
         self.report({'ERROR'}, msg)
 
     def init_handlers(self, context):
@@ -343,7 +351,7 @@ class T3DPaintMode(Tilemap3D, Operator):
         t_cube = mat_transform_edges(mat, self.select_cube)
         draw_wire(t_cube, color)
 
-        mat_rot = Matrix.Rotation(math.radians(self.cursor.rot), 4, 'Z')
+        mat_rot = Matrix.Rotation(radians(self.cursor.rot), 4, 'Z')
         mat_trans = Matrix.Translation(self.cursor.pos)
         mat = mat_scale * mat_trans * mat_rot
         mat = mat_world * mat
@@ -363,7 +371,7 @@ class T3DPaintMode(Tilemap3D, Operator):
 
         tile3d = self.active_tile3d
         text = tile3d if tile3d else 'No Active Tile'
-        draw_text_2d(text, size=15, color=GREY)
+        draw_text_2d(text, size=20, color=WHITE)
 
         # info
         vec3_str = "{}, {}, {}".format(int(self.cursor.pos.x), int(self.cursor.pos.y), int(self.cursor.pos.z))
@@ -452,7 +460,7 @@ class SetActiveTile3D(Operator):
         obj = context.object
         if obj is None: return False
         # assume is group instance
-        group = get_group(obj)
+        group = obj.group
         if group is None:
             # else might be the linked object
             group = get_first_group_name(obj)
@@ -527,7 +535,7 @@ class T3DSetupTilesOperator(bpy.types.Operator):
 
 def register():
     bpy.utils.register_module(__name__)
-    bpy.types.Scene.t3d = PointerProperty(type=Tilemap3DProperties)
+    bpy.types.Scene.t3d = PointerProperty(type=T3DProperties)
 
     # keymap
     wm = bpy.context.window_manager
