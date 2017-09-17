@@ -23,7 +23,6 @@ class T3DTest:
         self.test_end()
 
     def test_init(self):
-        # wow this is so much nicer without all the try/except...
         import logging
         import tilemap3d
         t3d = tilemap3d.Turtle3D(logging_level=logging.DEBUG)

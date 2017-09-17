@@ -1,4 +1,5 @@
 
+import bpy
 from .tilemap3d import Tilemap3D, round_vector
 from math import radians, floor
 from mathutils import Matrix, Vector
@@ -72,7 +73,14 @@ class Turtle3D(Tilemap3D):
         return self.cursor.rot
 
     def undo(self):
-        bpy.ops.ed.undo() # won't undo cursor position
+        # todo
+        # hmm, it always cancels the modal operator?
+        # bpy.ops.ed.undo() # won't undo cursor position
+        pass
+
+    def redo(self):
+        # bpy.ops.ed.redo()
+        pass
 
     def isdown(self):
         return self.state.paint

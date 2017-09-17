@@ -111,6 +111,17 @@ def restore_gl_defaults():
     bgl.glEnable(bgl.GL_DEPTH_TEST)
     bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
 
+def mouseover_region(area, event):
+    x, y = event.mouse_x, event.mouse_y
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            if (x >= region.x and
+                y >= region.y and
+                x < region.width + region.x and
+                y < region.height + region.y):
+                return True
+    return False
+
 class QuitError(Exception):
     # note: not an error
     pass
@@ -140,30 +151,33 @@ class T3DPanel(Panel):
 
     def draw(self, context):
         layout = self.layout
-        t3d = context.scene.t3d
+        prop = context.scene.t3d_prop
 
         row = layout.row(align=True)
         sub = row.row(align=True)
         sub.scale_x = 3.0
-        sub.prop(t3d, 'tile3d_library_path', text="")
+        sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
-        layout.operator(T3DPaintMode.bl_idname)
+        layout.operator(T3DManualMode.bl_idname)
         layout.operator(SetActiveTile3D.bl_idname)
         layout.separator()
         layout.operator(ConnectObjects.bl_idname)
         layout.separator()
         layout.operator(T3DSetupTilesOperator.bl_idname)
 
-class T3DPaintMode(Turtle3D, Operator):
+class T3DManualMode(Turtle3D, Operator):
     """Modal operator for constructing modular scenes"""
-    bl_idname = "view3d.t3d_paint_mode"
-    bl_label = "T3D Paint Mode"
+    bl_idname = "view3d.t3d"
+    bl_label = "Manual Mode"
 
     running_modal = False
 
+    last_pos = None # todo store on Empty custom properties
+    last_rot = None
+    last_tile3d = None
+
     def __init__(self):
         Turtle3D.__init__(self)
-        Operator.__init__(self)
         self._handle_3d = None
         self._handle_2d = None
         self.active_scene = None
@@ -189,20 +203,39 @@ class T3DPaintMode(Turtle3D, Operator):
             KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1)),
             KeyInput('C', 'PRESS', self.handle_copy, ctrl=True),
             KeyInput('V', 'PRESS', self.paste, ctrl=True),
-            KeyInput('B', 'PRESS', self.handle_select)
+            KeyInput('B', 'PRESS', self.handle_select),
+            KeyInput('Z', 'PRESS', self.undo, ctrl=True),
+            KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True)
         ]
+
+        if self.last_pos:
+            self.cursor.pos = self.last_pos
+        if self.last_rot:
+            self.cursor.rot = self.last_rot
+        if self.last_tile3d:
+            self.active_tile3d = self.last_tile3d
+
+    def on_quit(self):
+        bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
+        bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
+        T3DManualMode.last_pos = self.cursor.pos
+        T3DManualMode.last_rot = self.cursor.rot
+        T3DManualMode.last_tile3d = self.active_tile3d
+        T3DManualMode.running_modal = False
 
     @classmethod
     def poll(cls, context):
-        return not T3DPaintMode.running_modal
+        return not T3DManualMode.running_modal
 
     def modal(self, context, event):
         context.area.tag_redraw()
         try:
-            return self.handle_input(event)
+            if mouseover_region(context.area, event):
+                return self.handle_input(event)
+            return {'PASS_THROUGH'}
         except QuitError:
             self.on_quit()
-            return {'CANCELLED'}
+            return {'FINISHED'}
         except:
             exc_type, exc_msg, exc_tb = sys.exc_info()
             self.error("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
@@ -210,9 +243,8 @@ class T3DPaintMode(Turtle3D, Operator):
             return {'CANCELLED'}
 
     def invoke(self, context, event):
-        if T3DPaintMode.running_modal: return {'CANCELLED'}
-        T3DPaintMode.running_modal = True
-        settings = context.scene.t3d
+        if T3DManualMode.running_modal: return {'CANCELLED'}
+        T3DManualMode.running_modal = True
         if context.area.type == 'VIEW_3D':
             # init
             self.init()
@@ -232,11 +264,6 @@ class T3DPaintMode(Turtle3D, Operator):
         self._handle_3d = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_3d, args, 'WINDOW', 'POST_VIEW')
         self._handle_2d = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_2d, args, 'WINDOW', 'POST_PIXEL')
         context.window_manager.modal_handler_add(self)
-
-    def on_quit(self):
-        bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
-        bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
-        T3DPaintMode.running_modal = False
 
     def handle_quit(self):
         if self.state.grab:
@@ -455,7 +482,7 @@ class SetActiveTile3D(Operator):
 
     @classmethod
     def poll(cls, context):
-        if not T3DPaintMode.running_modal: return False
+        if not T3DManualMode.running_modal: return False
         obj = context.object
         if obj is None: return False
         # assume is group instance
@@ -534,7 +561,7 @@ class T3DSetupTilesOperator(bpy.types.Operator):
 
 def register():
     bpy.utils.register_module(__name__)
-    bpy.types.Scene.t3d = PointerProperty(type=T3DProperties)
+    bpy.types.Scene.t3d_prop = PointerProperty(type=T3DProperties)
 
     # keymap
     wm = bpy.context.window_manager
@@ -545,7 +572,7 @@ def register():
 
 def unregister():
     bpy.utils.unregister_module(__name__)
-    bpy.types.Scene.t3d = None
+    bpy.types.Scene.t3d_prop = None
 
     # keymap
     wm = bpy.context.window_manager

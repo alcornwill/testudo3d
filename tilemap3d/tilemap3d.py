@@ -182,6 +182,7 @@ class Tilemap3D:
         # init
         logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
         builtins.t3d = self # note: builtin abuse
+        bpy.types.Scene.t3d = self
         init_object_props()
 
     def init(self):
@@ -219,6 +220,7 @@ class Tilemap3D:
         self.delete()
         obj = self.create_tile(group, position=self.cursor.pos, rotz=self.cursor.rot)
         logging.debug("created object {}".format(obj.name))
+        bpy.ops.ed.undo_push()
         return obj
 
     def create_tile(self, group, position=None, rotz=None):
@@ -321,6 +323,7 @@ class Tilemap3D:
                 self.delete(ignore=item.tile3d)
             self.cursor.pos = orig_pos
         self.grabbed = None
+        bpy.ops.ed.undo_push()
 
     def copy(self):
         if self.state.select:
@@ -350,6 +353,7 @@ class Tilemap3D:
                 new.rot = radians(self.cursor.rot) + item.rot_offset
             self.cursor.pos = orig_pos
         logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
+        bpy.ops.ed.undo_push()
 
     def start_select(self):
         logging.debug("start box select")
