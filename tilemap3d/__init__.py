@@ -30,6 +30,7 @@ bl_info = {
 }
 
 import sys
+import logging
 import bpy
 import bgl
 import blf
@@ -50,7 +51,7 @@ from bpy.types import (
     Header
 )
 
-from .tilemap3d import update_3dviews, get_first_group_name
+from .tilemap3d import init_object_props, update_3dviews, get_first_group_name
 from .turtle3d import Turtle3D
 
 class Vec2:
@@ -159,11 +160,17 @@ class T3DPanel(Panel):
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
         layout.operator(T3DManualMode.bl_idname)
+        self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
         layout.separator()
         layout.operator(ConnectObjects.bl_idname)
         layout.separator()
         layout.operator(T3DSetupTilesOperator.bl_idname)
+
+    def display_selected_tile3d(self, context):
+        obj = context.object
+        if obj:
+            self.layout.label("selected: {}".format(obj.group))
 
 class T3DManualMode(Turtle3D, Operator):
     """Modal operator for constructing modular scenes"""
@@ -202,25 +209,16 @@ class T3DManualMode(Turtle3D, Operator):
             KeyInput('UP_ARROW', 'PRESS', lambda: self.smart_move(0, 1)),
             KeyInput('DOWN_ARROW', 'PRESS', lambda: self.smart_move(0, -1)),
             KeyInput('C', 'PRESS', self.handle_copy, ctrl=True),
-            KeyInput('V', 'PRESS', self.paste, ctrl=True),
+            KeyInput('V', 'PRESS', self.handle_paste, ctrl=True),
             KeyInput('B', 'PRESS', self.handle_select),
             KeyInput('Z', 'PRESS', self.undo, ctrl=True),
             KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True)
         ]
 
-        if self.last_pos:
-            self.cursor.pos = self.last_pos
-        if self.last_rot:
-            self.cursor.rot = self.last_rot
-        if self.last_tile3d:
-            self.active_tile3d = self.last_tile3d
-
     def on_quit(self):
+        Turtle3D.on_quit(self)
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
-        T3DManualMode.last_pos = self.cursor.pos
-        T3DManualMode.last_rot = self.cursor.rot
-        T3DManualMode.last_tile3d = self.active_tile3d
         T3DManualMode.running_modal = False
 
     @classmethod
@@ -284,10 +282,11 @@ class T3DManualMode(Turtle3D, Operator):
             self.state.paint = False
         elif not self.state.paint:
             self.state.paint = True
-            self.cdraw()
+            self._cdraw()
 
     def handle_paint_end(self):
         self.state.paint = False
+        bpy.ops.ed.undo_push()
 
     def handle_delete(self):
         if self.state.select:
@@ -296,28 +295,35 @@ class T3DManualMode(Turtle3D, Operator):
             self.state.delete = False
         elif not self.state.grab and not self.state.delete:
             self.state.delete = True
-            self.cdraw()
+            self._cdraw()
 
     def handle_delete_end(self):
         self.state.delete = False
+        bpy.ops.ed.undo_push()
 
     def handle_grab(self):
         if not self.state.grab:
             self.start_grab()
         else:
             self.end_grab()
+            bpy.ops.ed.undo_push()
 
     def handle_copy(self):
         self.copy()
         self.report({'INFO'}, '({}) tiles copied to clipboard'.format(len(self.clipboard) if self.clipboard else "0"))
 
+    def handle_paste(self):
+        self.paste()
+        bpy.ops.ed.undo_push()
+
     def handle_select(self):
-        if not self.state.select:
+        if self.state.grab:
+            return
+        elif not self.state.select:
             self.start_select()
         else:
             # cancel
-            self.state.select = False
-            self.construct_select_cube()
+            self.end_select()
 
     def handle_input(self, event):
         for keyinput in self.input_map:
@@ -330,6 +336,7 @@ class T3DManualMode(Turtle3D, Operator):
         return {'PASS_THROUGH'}
 
     def construct_select_cube(self):
+        logging.debug('construct select cube')
         if self.state.select:
             cube_min, cube_max = self.select_cube_bounds()
         else:
@@ -395,7 +402,7 @@ class T3DManualMode(Turtle3D, Operator):
         text_cursor.x = 20
         text_cursor.y = 140
 
-        tile3d = self.active_tile3d
+        tile3d = self.cursor.tile3d
         text = tile3d if tile3d else 'No Active Tile'
         draw_text_2d(text, size=20, color=WHITE)
 
@@ -476,7 +483,7 @@ class Selection(Header):
 class SetActiveTile3D(Operator):
     # we need this because modal operator only works for one window
     bl_idname = "view_3d.object_picker"
-    bl_label = "Set Active Module"
+    bl_label = "Set Active Tile3D"
 
     tile3d = None
 
@@ -494,7 +501,7 @@ class SetActiveTile3D(Operator):
         return True
 
     def execute(self, context):
-        t3d.active_tile3d = self.tile3d
+        t3d.cursor.tile3d = self.tile3d
         update_3dviews()
         return {'FINISHED'}
 
@@ -562,6 +569,7 @@ class T3DSetupTilesOperator(bpy.types.Operator):
 def register():
     bpy.utils.register_module(__name__)
     bpy.types.Scene.t3d_prop = PointerProperty(type=T3DProperties)
+    init_object_props()
 
     # keymap
     wm = bpy.context.window_manager

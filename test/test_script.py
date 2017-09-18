@@ -45,7 +45,7 @@ class PaintTest(T3DTest):
 
     def execute(self):
         # paint something
-        t3d.active_tile3d = 'Suzanne'
+        t3d.cursor.tile3d = 'Suzanne'
         t3d.state.paint = True
         t3d.translate(0, 1, 0)
 
@@ -54,7 +54,7 @@ class CircleTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        t3d.active_tile3d = 'Suzanne'
+        t3d.cursor.tile3d = 'Suzanne'
         t3d.circle(8)
 
 class LineTest(T3DTest):
@@ -62,7 +62,7 @@ class LineTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        t3d.active_tile3d = 'Suzanne'
+        t3d.cursor.tile3d = 'Suzanne'
         # t3d.line(0, 0, 9, 3)
         t3d.line(0, 0, 1, 9)
 
@@ -71,7 +71,7 @@ class CombinedTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        t3d.active_tile3d = 'Suzanne'
+        t3d.cursor.tile3d = 'Suzanne'
         # test all features
         # features: paint, delete, copy/paste, grab, fill region, clear region, copy/paste region, grab region
 
@@ -153,7 +153,7 @@ class TurtleTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        t3d.active_tile3d = 'Suzanne'
+        t3d.cursor.tile3d = 'Suzanne'
         # self.basic()
         self.snake_kolam()
 

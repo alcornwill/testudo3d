@@ -14,8 +14,7 @@ class Turtle3D(Tilemap3D):
     def forward(self, i):
         vec = Vector((0, i, 0))
         forward = self.cursor.forward
-        vec = forward * vec
-        vec = self.cursor.pos + vec
+        vec = self.cursor.pos + forward * vec
         if self.state.paint:
             self.line(self.getx(), self.gety(), vec.x, vec.y)
         self.goto(vec.x, vec.y)
@@ -34,12 +33,15 @@ class Turtle3D(Tilemap3D):
 
     def goto(self, x, y):
         self.cursor.pos = Vector((x, y, 0.0))
+        self.construct_select_cube()
 
     def setx(self, x):
         self.cursor.pos.x = x
+        self.construct_select_cube()
 
     def sety(self, y):
         self.cursor.pos.y = y
+        self.construct_select_cube()
 
     def getx(self):
         return self.cursor.pos.x
@@ -170,6 +172,10 @@ class Turtle3D(Tilemap3D):
         self.state.paint = state
 
     def clear(self):
+        state = self.state.delete
         self.state.delete = True
         self.end_select()
-        self.state.delete = False
+        self.state.delete = state
+        # state = State(delete=True)
+        # self.do_with_state(state, self.end_select)
+        # ?

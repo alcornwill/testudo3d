@@ -8,7 +8,8 @@ from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.kdtree import KDTree
 
 SEARCH_RANGE = 0.01
-CUSTOM_PROPERTY_TILE_SIZE_Z = "T3D_tile_size_z"
+CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
+CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
 ADJACENCY_VECTORS = (
     Vector((1, 0, 0)),
     Vector((-1, 0, 0)),
@@ -75,25 +76,9 @@ def update_3dviews():
             if area.type == 'VIEW_3D':
                 area.tag_redraw()
 
-def delete_object(obj):
-    bpy.data.objects.remove(obj, True)
-    logging.debug("deleted 1 object")
-    update_3dviews()
-
-def delete_objects(objects):
-    # use this when you can, saves calling update_3dview
-    if len(objects) == 0: return
-    for obj in objects:
-        bpy.data.objects.remove(obj, True)
-    logging.debug("deleted {} objects".format(len(objects)))
-    update_3dviews()
-
 def get_first_group_name(obj):
     if len(obj.users_group) > 0:
         return obj.users_group[0].name
-
-def log_created(obj):
-    logging.debug("created {}".format(str(obj)))
 
 def init_object_props():
     def get_pos(self):
@@ -122,14 +107,33 @@ def init_object_props():
     bpy.types.Object.group = property(get_group)
 
 class Cursor:
-    def __init__(self):
-        self.pos = Vector()
-        self.rot = 0 # in degrees
+    def __init__(self, tile3d=None, pos=None, rot=0):
+        self.tile3d = tile3d
+        self.pos = pos or Vector()
+        self.rot = rot # in degrees
 
     def get_forward(self):
         return Matrix.Rotation(radians(t3d.cursor.rot), 4, 'Z')
 
     forward = property(get_forward)
+
+    def serialize(self):
+        return "{tile3d},{x},{y},{z},{rot}".format(
+            tile3d=self.tile3d,
+            x=self.pos.x,
+            y=self.pos.y,
+            z=self.pos.z,
+            rot=self.rot
+        )
+
+    @staticmethod
+    def deserialize(str):
+        tile3d, x, y, z, rot = str.split(',')
+        x = float(x)
+        y = float(y)
+        z = float(z)
+        rot = float(rot)
+        return Cursor(tile3d, Vector((x, y, z)), rot)
 
 class GrabData:
     def __init__(self, tile3d):
@@ -172,7 +176,6 @@ class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root_obj = None
         self.tilesize_z = 1.0
-        self.active_tile3d = None
         self.cursor = Cursor()
         self.state = PaintModeState()
         self.select_start_pos = None
@@ -180,10 +183,10 @@ class Tilemap3D:
         self.clipboard = None
 
         # init
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
-        init_object_props()
 
     def init(self):
         self.init_root_obj()
@@ -194,10 +197,15 @@ class Tilemap3D:
         if self.root_obj is None:
             bpy.ops.object.empty_add()
             self.root_obj = bpy.context.scene.objects.active
-        if CUSTOM_PROPERTY_TILE_SIZE_Z not in self.root_obj:
-            self.root_obj[CUSTOM_PROPERTY_TILE_SIZE_Z] = 1.0
-        self.tilesize_z = self.root_obj[CUSTOM_PROPERTY_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
+        if CUSTOM_PROP_TILE_SIZE_Z not in self.root_obj:
+            self.root_obj[CUSTOM_PROP_TILE_SIZE_Z] = 1.0
+        self.tilesize_z = self.root_obj[CUSTOM_PROP_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
+        if CUSTOM_PROP_LAST_CURSOR in self.root_obj:
+            self.cursor = Cursor.deserialize(self.root_obj[CUSTOM_PROP_LAST_CURSOR])
         logging.debug("initialized root obj")
+
+    def on_quit(self):
+        self.root_obj[CUSTOM_PROP_LAST_CURSOR] = self.cursor.serialize()
 
     def error(self, msg):
         logging.error(msg)
@@ -209,49 +217,52 @@ class Tilemap3D:
     def get_tile3d(self):
         tiles = self._get_tiles()
         if len(tiles) > 0:
-            return tiles[0] # assume only one!
+            return tiles[0] # assume only one
 
     def paint(self):
-        tile3d = self.active_tile3d
+        tile3d = self.cursor.tile3d
         if tile3d is not None:
-            self.paint_tile(tile3d)
+            self.delete()
+            self.create_tile(tile3d)
 
-    def paint_tile(self, group):
-        self.delete()
-        obj = self.create_tile(group, position=self.cursor.pos, rotz=self.cursor.rot)
-        logging.debug("created object {}".format(obj.name))
-        bpy.ops.ed.undo_push()
-        return obj
-
-    def create_tile(self, group, position=None, rotz=None):
+    def create_tile(self, group):
         bpy.ops.object.group_instance_add(group=group)
         tile3d = bpy.context.scene.objects.active
         tile3d.empty_draw_size = 0.25
-        if position is not None:
-            tile3d.pos = position
-        if rotz is not None:
-            tile3d.rot = radians(rotz)
+        tile3d.pos = self.cursor.pos
+        tile3d.rot = radians(self.cursor.rot)
         tile3d.parent = self.root_obj
+        logging.debug("created object {}".format(tile3d.name))
         return tile3d
 
     def delete(self, ignore=None):
-        tile3d = self.get_tile3d()
-        if tile3d:
-            if ignore:
-                if tile3d == ignore: return
-            delete_object(tile3d)
+        tiles = self._get_tiles()
+        if ignore and ignore in tiles:
+            tiles.remove(ignore)
+        if any(tiles):
+            tile3d = tiles[0] # assume only one
+            self.delete_tile(tile3d)
+
+    def delete_tile(self, obj):
+        bpy.data.objects.remove(obj, True)
+        logging.debug("deleted 1 object")
+
+    def delete_tiles(self, objs):
+        # use this when you can, saves calling update_3dview
+        if not any(objs): return
+        for obj in objs:
+            bpy.data.objects.remove(obj, True)
+        logging.debug("deleted {} objects".format(len(objs)))
 
     def adjacent_occupied(self):
         finder = Tile3DFinder()
         return [len(finder.get_tiles_at(self.cursor.pos + vec)) > 0 for vec in ADJACENCY_VECTORS]
 
-    def cdraw(self):
-        # contextual draw
+    def _cdraw(self):
         if self.state.paint:
             self.paint()
         elif self.state.delete:
             self.delete()
-        self.construct_select_cube()
 
     def rotate(self, rot):
         # rotate the cursor and paint
@@ -267,8 +278,9 @@ class Tilemap3D:
                 vec = self.select_start_pos - self.cursor.pos
                 self.select_start_pos = mat_rot * vec
                 self.select_start_pos = self.select_start_pos + self.cursor.pos
+                self.construct_select_cube()
         self.cursor.rot = self.cursor.rot + rot
-        self.cdraw()
+        self._cdraw()
 
     def translate(self, x, y, z):
         # translate the cursor and paint
@@ -282,7 +294,8 @@ class Tilemap3D:
                 item.tile3d.pos = item.tile3d.pos + vec
             if self.state.select:
                 self.select_start_pos = self.select_start_pos + vec
-        self.cdraw()
+        self._cdraw()
+        self.construct_select_cube()
 
     def smart_move(self, x, y, repeat=1):
         # move in x or y, but only if already facing that direction
@@ -293,6 +306,10 @@ class Tilemap3D:
                 self.translate(0, round(mag), 0)
         else:
             self.rotate(rot - self.cursor.rot)
+            if repeat > 1:
+                # translate anyway
+                for i in range(repeat):
+                    self.translate(0, round(mag), 0)
 
     def start_grab(self):
         if self.state.select:
@@ -323,7 +340,6 @@ class Tilemap3D:
                 self.delete(ignore=item.tile3d)
             self.cursor.pos = orig_pos
         self.grabbed = None
-        bpy.ops.ed.undo_push()
 
     def copy(self):
         if self.state.select:
@@ -344,26 +360,27 @@ class Tilemap3D:
 
     def paste(self):
         if self.clipboard:
-            forward = self.cursor.forward
-            orig_pos = self.cursor.pos
             for item in self.clipboard:
-                vec = forward * item.pos_offset
-                self.cursor.pos = orig_pos + vec
-                new = self.paint_tile(item.group)
-                new.rot = radians(self.cursor.rot) + item.rot_offset
-            self.cursor.pos = orig_pos
+                pos = self.cursor.pos + item.pos_offset
+                rot = degrees(item.rot_offset)
+                cursor = Cursor(item.group, pos, rot)
+                self.do_with_cursor(cursor, self.paint)
         logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
-        bpy.ops.ed.undo_push()
+
+    def do_with_cursor(self, cursor, func, *args, **kw):
+        orig = self.cursor
+        self.cursor = cursor
+        func(*args, **kw)
+        self.cursor = orig
 
     def start_select(self):
         logging.debug("start box select")
         self.state.select = True
         self.select_start_pos = self.cursor.pos
-        self.construct_select_cube()
 
     def end_select(self):
         logging.debug("end box select")
-        self.select_bounds_func(self.cdraw)
+        self.do_region(self._cdraw)
         self.state.select = False
         self.construct_select_cube()
 
@@ -374,19 +391,19 @@ class Tilemap3D:
             tile3d = t3d.get_tile3d()
             if tile3d:
                 tiles.append(tile3d)
-        self.select_bounds_func(get_tiles, tiles)
+        self.do_region(get_tiles, tiles)
         return tiles
 
-    def select_bounds_func(self, func, *args):
+    def do_region(self, func, *args, **kw):
         # do func for each cell in select bounds
-        orig_cursor_pos = self.cursor.pos
+        orig_pos = self.cursor.pos
         cube_min, cube_max = self.select_cube_bounds()
         for z in range(int(round(abs(cube_max.z + 1 - cube_min.z)))):
             for y in range(int(round(abs(cube_max.y + 1 - cube_min.y)))):
                 for x in range(int(round(abs(cube_max.x + 1 - cube_min.x)))):
                     self.cursor.pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
-                    func(*args)
-        self.cursor.pos = orig_cursor_pos
+                    func(*args, **kw)
+        self.cursor.pos = orig_pos
 
     def construct_select_cube(self):
         pass
