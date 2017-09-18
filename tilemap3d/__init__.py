@@ -25,7 +25,7 @@ bl_info = {
     "location": "3D View > Tools > T3D",
     "description": "create 3D tilemaps",
     "warning": "",
-    "wiki_url": "https://github.com/alcornwill/modular_building_tool",
+    "wiki_url": "https://github.com/alcornwill/testudo3d",
     "category": "3D View",
 }
 
@@ -34,7 +34,7 @@ import logging
 import bpy
 import bgl
 import blf
-from math import ceil, sqrt, radians
+from math import ceil, sqrt, radians, degrees
 from mathutils import Vector, Quaternion, Euler, Matrix
 from bpy.props import (
     StringProperty,
@@ -51,7 +51,7 @@ from bpy.types import (
     Header
 )
 
-from .tilemap3d import init_object_props, update_3dviews, get_first_group_name
+from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
 from .turtle3d import Turtle3D
 
 class Vec2:
@@ -141,10 +141,16 @@ class T3DProperties(PropertyGroup):
         description="Path to your tile3d library .blend file",
         subtype="FILE_PATH"
     )
+    circle_radius = IntProperty(
+        name="Circle Radius",
+        description='Radius of circle',
+        default=5
+    )
+
 
 class T3DPanel(Panel):
     bl_idname = "view3d.tilemap3d_panel"
-    bl_label = "Tilemap3D Panel"
+    bl_label = "Testudo3D Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS'
     bl_category = "T3D"
@@ -160,12 +166,23 @@ class T3DPanel(Panel):
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
         layout.operator(T3DManualMode.bl_idname)
+        layout.separator()
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
+        layout.operator(CursorToSelected.bl_idname)
         layout.separator()
-        layout.operator(ConnectObjects.bl_idname)
+        layout.label('drawing')
+        layout.operator(T3DDown.bl_idname)
+        layout.operator(T3DUp.bl_idname)
+        layout.operator(Goto3DCursor.bl_idname)
+        row = layout.row(align=True)
+        row.operator(T3DCircle.bl_idname)
+        row.prop(prop, 'circle_radius')
         layout.separator()
+        layout.label('misc')
         layout.operator(T3DSetupTilesOperator.bl_idname)
+        layout.operator(AlignTiles.bl_idname)
+        layout.operator(ConnectObjects.bl_idname)
 
     def display_selected_tile3d(self, context):
         obj = context.object
@@ -173,7 +190,7 @@ class T3DPanel(Panel):
             self.layout.label("selected: {}".format(obj.group))
 
 class T3DManualMode(Turtle3D, Operator):
-    """Modal operator for constructing modular scenes"""
+    """Manually position tiles"""
     bl_idname = "view3d.t3d"
     bl_label = "Manual Mode"
 
@@ -482,7 +499,7 @@ class Selection(Header):
 
 class SetActiveTile3D(Operator):
     # we need this because modal operator only works for one window
-    bl_idname = "view_3d.object_picker"
+    bl_idname = "view_3d.t3d_set_active_tile3d"
     bl_label = "Set Active Tile3D"
 
     tile3d = None
@@ -503,6 +520,90 @@ class SetActiveTile3D(Operator):
     def execute(self, context):
         t3d.cursor.tile3d = self.tile3d
         update_3dviews()
+        return {'FINISHED'}
+
+class CursorToSelected(Operator):
+    bl_idname = "view_3d.t3d_cursor_to_selected"
+    bl_label = "Cursor To Selected"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal and context.object
+
+    def execute(self, context):
+        t3d.cursor.pos = context.object.pos
+        t3d.construct_select_cube()
+        return {'FINISHED'}
+
+class Goto3DCursor(Operator):
+    bl_idname = "view_3d.t3d_goto_3dcursor"
+    bl_label = "Goto 3D Cursor"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal
+
+    def execute(self, context):
+        pos = context.space_data.cursor_location
+        round_vector(pos)
+        t3d.goto(pos.x, pos.y) # note: 2D only...
+        return {'FINISHED'}
+
+class T3DDown(Operator):
+    bl_idname = "view_3d.t3d_down"
+    bl_label = "Down"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal
+
+    def execute(self, context):
+        t3d.down()
+        return {'FINISHED'}
+
+class T3DUp(Operator):
+    bl_idname = "view_3d.t3d_up"
+    bl_label = "Up"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal
+
+    def execute(self, context):
+        t3d.up()
+        return {'FINISHED'}
+
+class T3DCircle(Operator):
+    bl_idname = "view_3d.t3d_circle"
+    bl_label = "Circle"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal
+
+    def execute(self, context):
+        radius = context.scene.t3d_prop.circle_radius
+        t3d.circle(radius=radius)
+        return {'FINISHED'}
+
+class AlignTiles(Operator):
+    bl_idname = 'view_3d.t3d_align_tiles'
+    bl_label = 'Align Tiles'
+
+    @classmethod
+    def poll(cls, context):
+        return T3DManualMode.running_modal
+
+    def execute(self, context):
+        # for every child, align to grid
+        for child in t3d.root_obj.children:
+            vec = child.pos
+            round_vector(vec)
+            child.pos = vec
+
+            rot = degrees(child.rot)
+            rot = roundbase(rot, 90)
+            child.rot = radians(rot)
         return {'FINISHED'}
 
 def select_all():

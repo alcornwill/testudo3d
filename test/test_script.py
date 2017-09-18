@@ -63,8 +63,8 @@ class LineTest(T3DTest):
 
     def execute(self):
         t3d.cursor.tile3d = 'Suzanne'
-        # t3d.line(0, 0, 9, 3)
-        t3d.line(0, 0, 1, 9)
+        # t3d.line(9, 3)
+        t3d.line(1, 9)
 
 class CombinedTest(T3DTest):
     name = "combined_test"

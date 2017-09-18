@@ -1,4 +1,5 @@
 
+import logging
 import bpy
 from .tilemap3d import Tilemap3D, round_vector
 from math import radians, floor
@@ -15,8 +16,6 @@ class Turtle3D(Tilemap3D):
         vec = Vector((0, i, 0))
         forward = self.cursor.forward
         vec = self.cursor.pos + forward * vec
-        if self.state.paint:
-            self.line(self.getx(), self.gety(), vec.x, vec.y)
         self.goto(vec.x, vec.y)
 
     def backward(self, i):
@@ -32,7 +31,10 @@ class Turtle3D(Tilemap3D):
         self.cursor.rot = r
 
     def goto(self, x, y):
-        self.cursor.pos = Vector((x, y, 0.0))
+        if self.state.paint:
+            self.line(x, y)
+        self.cursor.pos.x = x
+        self.cursor.pos.y = y
         self.construct_select_cube()
 
     def setx(self, x):
@@ -88,7 +90,8 @@ class Turtle3D(Tilemap3D):
         return self.state.paint
 
     def plot(self, x, y):
-        self.goto(x, y)
+        self.cursor.pos.x = x
+        self.cursor.pos.y = y
         self.dot()
 
     def circle(self, radius):
@@ -116,7 +119,8 @@ class Turtle3D(Tilemap3D):
                 err -= 2*x + 1
         self.goto(x0, y0)
 
-    def line(self, x1, y1, x2, y2):
+    def line(self, x2, y2):
+        x1, y1 = self.getx(), self.gety()
         x1 = floor(x1)
         y1 = floor(y1)
         x2 = floor(x2)
@@ -148,9 +152,9 @@ class Turtle3D(Tilemap3D):
 
             if dx > dy:
                 frac = dy - (dx >> 1)
-                while x1 != x1:
+                while x1 != x2:
                     if frac >= 0:
-                        y1 = y2 + stepy
+                        y1 = y1 + stepy
                         frac = frac - dx
                     x1 = x1 + stepx
                     frac = frac + dy

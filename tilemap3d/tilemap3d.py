@@ -28,6 +28,9 @@ def get_key(dict_, key, default=None):
 def any(lst):
     return len(lst) > 0
 
+def roundbase(x, base):
+    return int(base * round(float(x)/base))
+
 def mid(a, b, c):
     return min(max(a, b), max(b, c), max(a, c))
 
