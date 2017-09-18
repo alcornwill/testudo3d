@@ -455,7 +455,7 @@ class LinkTile3DLibrary(Operator):
     bl_label = "Link"
 
     def execute(self, context):
-        t3d = context.scene.t3d
+        t3d = context.scene.t3d_prop
         with bpy.data.libraries.load(t3d.tile3d_library_path, link=True) as (data_src, data_dst):
             # link groups
             data_dst.groups = data_src.groups

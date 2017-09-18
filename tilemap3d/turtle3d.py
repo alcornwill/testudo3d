@@ -31,6 +31,8 @@ class Turtle3D(Tilemap3D):
         self.cursor.rot = r
 
     def goto(self, x, y):
+        x = round(x)
+        y = round(y)
         if self.state.paint:
             self.line(x, y)
         self.cursor.pos.x = x
@@ -117,14 +119,15 @@ class Turtle3D(Tilemap3D):
             if err > 0:
                 x -= 1
                 err -= 2*x + 1
-        self.goto(x0, y0)
+        self.setx(x0)
+        self.sety(y0)
 
     def line(self, x2, y2):
         x1, y1 = self.getx(), self.gety()
-        x1 = floor(x1)
-        y1 = floor(y1)
-        x2 = floor(x2)
-        y2 = floor(y2)
+        x1 = int(x1)
+        y1 = int(y1)
+        x2 = int(x2)
+        y2 = int(y2)
 
         dx = x2 - x1
         dy = y2 - y1

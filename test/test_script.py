@@ -57,15 +57,6 @@ class CircleTest(T3DTest):
         t3d.cursor.tile3d = 'Suzanne'
         t3d.circle(8)
 
-class LineTest(T3DTest):
-    name = "line_test"
-    save_blend = True
-
-    def execute(self):
-        t3d.cursor.tile3d = 'Suzanne'
-        # t3d.line(9, 3)
-        t3d.line(1, 9)
-
 class CombinedTest(T3DTest):
     name = "combined_test"
     save_blend = True
@@ -181,14 +172,16 @@ class TurtleTest(T3DTest):
         snake_replacementRules = {"b": "b+f+b--f--b+f+b"}
         snake_start = "b--f--b--f"
 
-        drawing = self.replace(snake_start, snake_replacementRules, 3)
+        drawing = self.replace(snake_start, snake_replacementRules, 2)
 
-        t3d.up()
-        t3d.backward(25)
+        t3d.root_obj.location.x = 0.5
+        t3d.root_obj.location.y = -0.5
+        t3d.setx(1)
+        t3d.sety(-36)
         t3d.down()
         self.draw(drawing, snake_rules)
 
-    def replace(self, seq, replacementRules, n ):
+    def replace(self, seq, replacementRules, n):
         for i in range(n):
             newseq = ""
             for element in seq:
@@ -196,15 +189,45 @@ class TurtleTest(T3DTest):
             seq = newseq
         return seq
 
-    def draw(self, commands, rules ):
+    def draw(self, commands, rules):
         for b in commands:
-            try:
-                rules[b]()
-            except TypeError:
-                try:
-                    draw(rules[b], rules)
-                except:
-                    pass
+            result = rules[b]
+            if callable(result):
+                result()
+            else:
+                self.draw(result, rules)
+
+class CellularAutomataTest(T3DTest):
+    name = "cellular_automata_test"
+    save_blend = True
+
+    def execute(self):
+        from tilemap3d.tilemap3d import Tile3DFinder, any
+        from mathutils import Vector
+        rule = 126
+        width = 32
+        time = 32
+
+        hw = int(width/2)
+
+        t3d.cursor.tile3d = 'Suzanne'
+        t3d.paint()
+        t3d.translate(-1, 0, 0)
+        t3d.paint()
+        for t in range(time):
+            finder = Tile3DFinder()
+            for x in range(-hw, hw, 1):
+                a = finder.get_tiles_at(Vector((x-1, t, 0)))
+                b = finder.get_tiles_at(Vector((x  , t, 0)))
+                c = finder.get_tiles_at(Vector((x+1, t, 0)))
+                a = any(a)
+                b = any(b)
+                c = any(c)
+                value = a << 2 | b << 1 | c
+                result = rule >> value & 1
+                if result:
+                    t3d.cursor.pos = Vector((x, t+1, 0))
+                    t3d.paint()
 
 def get_tests():
     global tests
