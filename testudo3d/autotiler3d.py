@@ -43,7 +43,9 @@ def parse_rules(path):
             if not b: continue # use default
             n = int(a, 2)
             rules[n] = Rule(b)
-            # z rotation symmetry rules
+            # z rotation rules
+            # (magically you can override these in rules.txt and still works)
+            #     (as long as defined in numerical order)
             n_ = n & 0b001111
             d = n & 0b110000
             if n_ in ROTATE:
@@ -61,7 +63,13 @@ class AutoTiler3D(Turtle3D):
     def __init__(self, *args, **kw):
         Turtle3D.__init__(self, *args, **kw)
         self.auto_root = None
-        self.automode = 'random' # todo 'random', 'dither', 'first'
+
+        # test
+        item = bpy.context.scene.t3d_prop.tilesets.add()
+        item.path = 'popo'
+        item = bpy.context.scene.t3d_prop.tilesets.add()
+        item.path = 'popo2'
+        print("happening")
 
     def init(self):
         Turtle3D.init(self)
@@ -133,9 +141,16 @@ class AutoTiler3D(Turtle3D):
             rule = (self.rules[bitmask]
                     if bitmask in self.rules
                     else self.default)
-            if self.automode == 'random':
+            automode = bpy.context.scene.t3d_prop.auto_mode
+            if automode == 'random':
                 group = choice(rule.tiles)
+            if automode == 'first':
+                group = rule.tiles[0]
+            if automode == 'dither':
+                pos = self.cursor.pos
+                idx = int(pos.x + pos.y + pos.z)
+                idx %= len(rule.tiles)
+                group = rule.tiles[idx]
             tile3d = self.create_tile(group)
             tile3d.rot = radians(rule.rot)
         self.root = self.root_obj
-        # todo also do this on delete

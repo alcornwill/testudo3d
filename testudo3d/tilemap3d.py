@@ -152,7 +152,6 @@ class Clipboard:
         self.rot_offset = tile3d.rot - radians(t3d.cursor.rot)
 
 class Tile3DFinder:
-    # todo can kd.remove? would be faster?
     def __init__(self):
         self.kd = None
         self.childs = None

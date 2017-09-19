@@ -43,12 +43,14 @@ from bpy.props import (
     FloatProperty,
     EnumProperty,
     PointerProperty,
+    CollectionProperty
 )
 from bpy.types import (
     Panel,
     Operator,
     PropertyGroup,
-    Header
+    Header,
+    UIList
 )
 
 from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
@@ -136,6 +138,19 @@ class KeyInput:
         self.ctrl = ctrl
         self.shift = shift
 
+class TilesetList(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, 'path', text="")
+        # todo row.operator(SetActiveTileset)
+
+class TilesetPropertyGroup(PropertyGroup):
+    rules_path = StringProperty(
+        name="Rules Path",
+        description="Path to your rules.txt file (for auto-tiling)",
+        subtype="FILE_PATH"
+    )
+
 class T3DProperties(PropertyGroup):
     tile3d_library_path = StringProperty(
         name="Tile3D Library Path",
@@ -147,12 +162,24 @@ class T3DProperties(PropertyGroup):
         description='Radius of circle',
         default=5
     )
-    rules_path = StringProperty(
-        name="Rules Path",
-        description="Path to your rules.txt file (for auto-tiling)",
-        subtype="FILE_PATH"
+    auto_mode = EnumProperty(
+        name='Mode',
+        description='Method used to pick tile when multiple',
+        items=(
+            ('random', 'Random', ''),
+            ('dither', 'Dither', ''),
+            ('first', 'First', ''),
+        ),
+        default='random',
     )
-
+    tilesets = CollectionProperty(
+        name='Tilesets',
+        description='Tilesets (for auto-tiling)',
+        type=TilesetPropertyGroup
+    )
+    tileset_idx = IntProperty(
+        default=0
+    )
 
 class T3DPanel(Panel):
     bl_idname = "view3d.tilemap3d_panel"
@@ -173,7 +200,9 @@ class T3DPanel(Panel):
         row.operator(LinkTile3DLibrary.bl_idname)
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
-        layout.prop(prop, 'rules_path', text="")
+        layout.prop(prop, 'auto_mode')
+        # todo operator AddTileset RemoveTileset
+        layout.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
         layout.separator()
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
