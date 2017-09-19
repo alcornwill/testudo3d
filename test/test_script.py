@@ -24,8 +24,8 @@ class T3DTest:
 
     def test_init(self):
         import logging
-        import tilemap3d
-        t3d = tilemap3d.Turtle3D(logging_level=logging.DEBUG)
+        import testudo3d
+        t3d = testudo3d.Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
@@ -38,16 +38,6 @@ class T3DTest:
                 os.makedirs(RESULTS_DIR)
             blend_path = os.path.join(RESULTS_DIR, self.name + ".blend")
             bpy.ops.wm.save_as_mainfile(filepath=blend_path, relative_remap=False)
-
-class PaintTest(T3DTest):
-    name = "paint_test"
-    save_blend = True
-
-    def execute(self):
-        # paint something
-        t3d.cursor.tile3d = 'Suzanne'
-        t3d.state.paint = True
-        t3d.translate(0, 1, 0)
 
 class CircleTest(T3DTest):
     name = "circle_test"
@@ -202,7 +192,7 @@ class CellularAutomataTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        from tilemap3d.tilemap3d import Tile3DFinder, any
+        from testudo3d.tilemap3d import Tile3DFinder, any
         from mathutils import Vector
         rule = 126
         width = 32

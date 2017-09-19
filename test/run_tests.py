@@ -4,9 +4,6 @@ import unittest
 
 class T3DUnitTests(unittest.TestCase):
     # basic functional tests
-    def paint_test(self):
-        PaintTest().run_in_blender()
-
     def circle_test(self):
         CircleTest().run_in_blender()
 

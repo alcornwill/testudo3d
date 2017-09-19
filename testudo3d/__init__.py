@@ -18,7 +18,7 @@
 
 
 bl_info = {
-    "name": "Tilemap3D",
+    "name": "Testudo3D",
     "author": "Will Alcorn",
     "version": (0, 1),
     "blender": (2, 78, 0),
@@ -53,6 +53,7 @@ from bpy.types import (
 
 from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
 from .turtle3d import Turtle3D
+from .autotiler3d import AutoTiler3D
 
 class Vec2:
     def __init__(self, x, y):
@@ -165,7 +166,8 @@ class T3DPanel(Panel):
         sub.scale_x = 3.0
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
-        layout.operator(T3DManualMode.bl_idname)
+        layout.operator(ManualModeOperator.bl_idname)
+        layout.operator(AutoModeOperator.bl_idname)
         layout.separator()
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
@@ -189,11 +191,7 @@ class T3DPanel(Panel):
         if obj:
             self.layout.label("selected: {}".format(obj.group))
 
-class T3DManualMode(Turtle3D, Operator):
-    """Manually position tiles"""
-    bl_idname = "view3d.t3d"
-    bl_label = "Manual Mode"
-
+class T3DOperatorBase:
     running_modal = False
 
     last_pos = None # todo store on Empty custom properties
@@ -201,7 +199,6 @@ class T3DManualMode(Turtle3D, Operator):
     last_tile3d = None
 
     def __init__(self):
-        Turtle3D.__init__(self)
         self._handle_3d = None
         self._handle_2d = None
         self.active_scene = None
@@ -233,14 +230,13 @@ class T3DManualMode(Turtle3D, Operator):
         ]
 
     def on_quit(self):
-        Turtle3D.on_quit(self)
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
-        T3DManualMode.running_modal = False
+        T3DOperatorBase.running_modal = False
 
     @classmethod
     def poll(cls, context):
-        return not T3DManualMode.running_modal
+        return not T3DOperatorBase.running_modal
 
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -258,8 +254,8 @@ class T3DManualMode(Turtle3D, Operator):
             return {'CANCELLED'}
 
     def invoke(self, context, event):
-        if T3DManualMode.running_modal: return {'CANCELLED'}
-        T3DManualMode.running_modal = True
+        if T3DOperatorBase.running_modal: return {'CANCELLED'}
+        T3DOperatorBase.running_modal = True
         if context.area.type == 'VIEW_3D':
             # init
             self.init()
@@ -270,7 +266,6 @@ class T3DManualMode(Turtle3D, Operator):
             return {'CANCELLED'}
 
     def error(self, msg):
-        Turtle3D.error(self, msg)
         self.report({'ERROR'}, msg)
 
     def init_handlers(self, context):
@@ -429,6 +424,46 @@ class T3DManualMode(Turtle3D, Operator):
 
         restore_gl_defaults()
 
+class ManualModeOperator(Turtle3D, T3DOperatorBase, Operator):
+    """Manually position tiles"""
+    bl_idname = "view3d.t3d_manual"
+    bl_label = "Manual Mode"
+
+    def __init__(self):
+        Turtle3D.__init__(self)
+        T3DOperatorBase.__init__(self)
+
+    def on_quit(self):
+        Turtle3D.on_quit(self)
+        T3DOperatorBase.on_quit(self)
+
+    def error(self, msg):
+        Turtle3D.error(self, msg)
+        T3DOperatorBase.error(self, msg)
+
+    def construct_select_cube(self):
+        T3DOperatorBase.construct_select_cube(self)
+
+class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
+    """Automatically generate tiles from terrain"""
+    bl_idname = "view3d.t3d_auto"
+    bl_label = "Auto Mode"
+
+    def __init__(self):
+        AutoTiler3D.__init__(self)
+        T3DOperatorBase.__init__(self)
+
+    def on_quit(self):
+        AutoTiler3D.on_quit(self)
+        T3DOperatorBase.on_quit(self)
+
+    def error(self, msg):
+        AutoTiler3D.error(self, msg)
+        T3DOperatorBase.error(self, msg)
+
+    def construct_select_cube(self):
+        T3DOperatorBase.construct_select_cube(self)
+
 class ConnectObjects(Operator):
     """Connect two objects with constraints utility"""
     bl_idname = "view3d.connect_objects"
@@ -506,7 +541,7 @@ class SetActiveTile3D(Operator):
 
     @classmethod
     def poll(cls, context):
-        if not T3DManualMode.running_modal: return False
+        if not T3DOperatorBase.running_modal: return False
         obj = context.object
         if obj is None: return False
         # assume is group instance
@@ -528,7 +563,7 @@ class CursorToSelected(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal and context.object
+        return T3DOperatorBase.running_modal and context.object
 
     def execute(self, context):
         t3d.cursor.pos = context.object.pos
@@ -541,7 +576,7 @@ class Goto3DCursor(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal
+        return T3DOperatorBase.running_modal
 
     def execute(self, context):
         pos = context.space_data.cursor_location
@@ -555,7 +590,7 @@ class T3DDown(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal
+        return T3DOperatorBase.running_modal
 
     def execute(self, context):
         t3d.down()
@@ -567,7 +602,7 @@ class T3DUp(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal
+        return T3DOperatorBase.running_modal
 
     def execute(self, context):
         t3d.up()
@@ -579,7 +614,7 @@ class T3DCircle(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal
+        return T3DOperatorBase.running_modal
 
     def execute(self, context):
         radius = context.scene.t3d_prop.circle_radius
@@ -592,7 +627,7 @@ class AlignTiles(Operator):
 
     @classmethod
     def poll(cls, context):
-        return T3DManualMode.running_modal
+        return T3DOperatorBase.running_modal
 
     def execute(self, context):
         # for every child, align to grid
@@ -614,7 +649,7 @@ def deselect_all():
     for obj in bpy.data.objects:
         obj.select = False
 
-class T3DSetupTilesOperator(bpy.types.Operator):
+class T3DSetupTilesOperator(Operator):
     """Setup 3D Tiles for tile library"""
     bl_idname = 'view3d.t3d_setup_tiles'
     bl_label = 'Setup 3D Tiles'
