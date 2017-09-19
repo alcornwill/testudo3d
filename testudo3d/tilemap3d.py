@@ -11,10 +11,11 @@ SEARCH_RANGE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
 ADJACENCY_VECTORS = (
-    Vector((1, 0, 0)),
-    Vector((-1, 0, 0)),
+    # DUWSEN
     Vector((0, 1, 0)),
+    Vector((1, 0, 0)),
     Vector((0, -1, 0)),
+    Vector((-1, 0, 0)),
     Vector((0, 0, 1)),
     Vector((0, 0, -1))
 )
@@ -151,12 +152,13 @@ class Clipboard:
         self.rot_offset = tile3d.rot - radians(t3d.cursor.rot)
 
 class Tile3DFinder:
+    # todo can kd.remove? would be faster?
     def __init__(self):
         self.kd = None
         self.childs = None
 
         # init
-        self.childs = t3d.root_obj.children
+        self.childs = t3d.root.children
         size = len(self.childs)
         self.kd = KDTree(size)
 
@@ -178,6 +180,7 @@ class PaintModeState:
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root_obj = None
+        self.root = None # 'active root'
         self.tilesize_z = 1.0
         self.cursor = Cursor()
         self.state = PaintModeState()
@@ -199,12 +202,14 @@ class Tilemap3D:
         self.root_obj = bpy.context.object
         if self.root_obj is None:
             bpy.ops.object.empty_add()
-            self.root_obj = bpy.context.scene.objects.active
+            self.root_obj = bpy.context.object
+            self.root_obj.name = 'Root'
         if CUSTOM_PROP_TILE_SIZE_Z not in self.root_obj:
             self.root_obj[CUSTOM_PROP_TILE_SIZE_Z] = 1.0
         self.tilesize_z = self.root_obj[CUSTOM_PROP_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
         if CUSTOM_PROP_LAST_CURSOR in self.root_obj:
             self.cursor = Cursor.deserialize(self.root_obj[CUSTOM_PROP_LAST_CURSOR])
+        self.root = self.root_obj
         logging.debug("initialized root obj")
 
     def on_quit(self):
@@ -228,13 +233,16 @@ class Tilemap3D:
             self.delete()
             self.create_tile(tile3d)
 
-    def create_tile(self, group):
-        bpy.ops.object.group_instance_add(group=group)
-        tile3d = bpy.context.scene.objects.active
+    def create_tile(self, group=None):
+        if group:
+            bpy.ops.object.group_instance_add(group=group)
+        else:
+            bpy.ops.object.empty_add()
+        tile3d = bpy.context.object
         tile3d.empty_draw_size = 0.25
         tile3d.pos = self.cursor.pos
         tile3d.rot = radians(self.cursor.rot)
-        tile3d.parent = self.root_obj
+        tile3d.parent = self.root
         logging.debug("created object {}".format(tile3d.name))
         return tile3d
 
@@ -256,10 +264,6 @@ class Tilemap3D:
         for obj in objs:
             bpy.data.objects.remove(obj, True)
         logging.debug("deleted {} objects".format(len(objs)))
-
-    def adjacent_occupied(self):
-        finder = Tile3DFinder()
-        return [len(finder.get_tiles_at(self.cursor.pos + vec)) > 0 for vec in ADJACENCY_VECTORS]
 
     def _cdraw(self):
         if self.state.paint:

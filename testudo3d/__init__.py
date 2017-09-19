@@ -147,6 +147,11 @@ class T3DProperties(PropertyGroup):
         description='Radius of circle',
         default=5
     )
+    rules_path = StringProperty(
+        name="Rules Path",
+        description="Path to your rules.txt file (for auto-tiling)",
+        subtype="FILE_PATH"
+    )
 
 
 class T3DPanel(Panel):
@@ -168,6 +173,7 @@ class T3DPanel(Panel):
         row.operator(LinkTile3DLibrary.bl_idname)
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
+        layout.prop(prop, 'rules_path', text="")
         layout.separator()
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
@@ -696,8 +702,15 @@ class T3DSetupTilesOperator(Operator):
                 x = 0
                 count = 0
 
+    def rename_objects(self):
+        # if contains whitespace replace with underscore
+        for obj in self.objects:
+            if ' ' in obj.name:
+                obj.name = obj.name.replace(' ', '_')
+
     def setup_tiles(self):
         self.objects = [obj for obj in bpy.data.objects if obj.type == 'MESH']
+        self.rename_objects()
         self.layout_in_grid()
         self.remove_all_groups()
         self.create_groups()

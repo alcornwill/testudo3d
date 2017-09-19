@@ -24,8 +24,10 @@ class T3DTest:
 
     def test_init(self):
         import logging
-        import testudo3d
-        t3d = testudo3d.Turtle3D(logging_level=logging.DEBUG)
+        # from testudo3d import AutoTiler3D
+        # t3d = AutoTiler3D(logging_level=logging.DEBUG)
+        from testudo3d import Turtle3D
+        t3d = Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
