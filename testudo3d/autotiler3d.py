@@ -7,6 +7,7 @@ from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS
 from .turtle3d import Turtle3D
 
 CUSTOM_PROP_AUTO = 't3d_auto'
+CUSTOM_PROP_TILESET = 't3d_tileset'
 
 def readlines(path):
     with open(path) as f:
@@ -14,13 +15,27 @@ def readlines(path):
         lines = [x.strip() for x in lines]
     return lines
 
+class Ruleset:
+    def __init__(self, rules, default):
+        self.rules = rules
+        self.default = default
+
+    def get(self, bitmask):
+        if bitmask in self.rules:
+            return self.rules[bitmask]
+        elif self.default:
+            return self.default
+        # else None
+
 class Rule:
-    def __init__(self, tiles, rot=0):
-        self.tiles = tiles
+    def __init__(self, tile3d, rot=0):
+        self.tile3d = tile3d
         self.rot = rot
 
+        # todo 'warning rule contains tile not presend in blend "{}"'
+
     def __str__(self):
-        return '{} {}'.format(self.tiles, self.rot)
+        return '{} {}'.format(self.tile3d, self.rot)
 
 def parse_rules(path):
     ROTATE = {
@@ -39,8 +54,9 @@ def parse_rules(path):
         if not any(split): continue
         a = split[0]
         b = split[1:]
+        if not b: continue # none or default
+        b = b[0] # only one supported
         try:
-            if not b: continue # use default
             n = int(a, 2)
             rules[n] = Rule(b)
             # z rotation rules
@@ -57,30 +73,28 @@ def parse_rules(path):
             if a == 'default':
                 default = Rule(b or None)
 
-    return rules, default
+    return Ruleset(rules, default)
 
 class AutoTiler3D(Turtle3D):
     def __init__(self, *args, **kw):
         Turtle3D.__init__(self, *args, **kw)
-        self.auto_root = None
 
     def init(self):
         Turtle3D.init(self)
-        self.cursor.tile3d = 'Tileset1' # todo tilesets
-        # would be nice to change draw 2D callback to change color
-        # Cursor.draw_2d()?
-
         self.init_auto_root()
         self.init_rules()
 
     def init_rules(self):
-        prop = bpy.context.scene.t3d_prop
-        tileset = prop.tilesets[prop.tileset_idx]
-        path = bpy.path.abspath(tileset.path)
-        self.rules, self.default = parse_rules(path)
+        tileset = self.get_active_tileset()
+        self.cursor.tile3d = tileset.tileset_name # todo update in modal()
+        # would be nice to change draw 2D callback to change color
+        # Cursor.draw_2d()?
 
-        # for tileset in prop.tilesets:
-            # self.rules[tileset.tileset_name] = parse_rules(tileset.path)
+        prop = bpy.context.scene.t3d_prop
+        self.rulesets = {}
+        for tileset in prop.tilesets:
+            path = bpy.path.abspath(tileset.path)
+            self.rulesets[tileset.tileset_name] = parse_rules(path)
 
     def init_auto_root(self):
         parent = self.root_obj.parent
@@ -108,7 +122,8 @@ class AutoTiler3D(Turtle3D):
 
     def paint(self):
         Turtle3D.delete(self)
-        self.create_tile()
+        tile3d = self.create_tile('empty')
+        tile3d[CUSTOM_PROP_TILESET] = self.get_active_tileset().tileset_name
         self.do_auto_tiling()
 
     def get_occupied(self):
@@ -118,40 +133,35 @@ class AutoTiler3D(Turtle3D):
         return center, adjacent
 
     def do_auto_tiling(self):
-        self.auto_tiling()
+        tileset = self.get_active_tileset()
+        self.auto_tiling(tileset.tileset_name)
         # repaint adjacent
         orig_pos = self.cursor.pos
         for vec in ADJACENCY_VECTORS:
             cursor = Cursor(None, orig_pos + vec, 0)
             self.do_with_cursor(cursor, self.auto_tiling)
 
-    def auto_tiling(self):
+    def get_active_tileset(self):
+        prop = bpy.context.scene.t3d_prop
+        return prop.tilesets[prop.tileset_idx]
+
+    def auto_tiling(self, tileset=None):
         # check adjacent cells if occupied
         center, adjacent = self.get_occupied()
         bitmask = 0
         for i, tiles in enumerate(adjacent):
             bitmask |= bool(tiles) << i
 
+        if center:
+            tileset = tileset or center[0][CUSTOM_PROP_TILESET]
+            ruleset = self.rulesets[tileset]
+            rule = ruleset.get(bitmask)
+
         self.root = self.auto_root
         Turtle3D.delete(self)
 
-        rule = None
-        if bitmask in self.rules:
-            rule = self.rules[bitmask]
-        elif self.default:
-            rule = self.default
-
         if center and rule:
-            automode = bpy.context.scene.t3d_prop.auto_mode
-            if automode == 'random':
-                group = choice(rule.tiles)
-            if automode == 'first':
-                group = rule.tiles[0]
-            if automode == 'dither':
-                pos = self.cursor.pos
-                idx = int(pos.x + pos.y + pos.z)
-                idx %= len(rule.tiles)
-                group = rule.tiles[idx]
-            tile3d = self.create_tile(group)
+            tile3d = self.create_tile(rule.tile3d)
             tile3d.rot = radians(rule.rot)
+            tile3d[CUSTOM_PROP_TILESET] = tileset
         self.root = self.root_obj

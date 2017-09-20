@@ -232,11 +232,11 @@ class Tilemap3D:
             self.delete()
             self.create_tile(tile3d)
 
-    def create_tile(self, group=None):
-        if group:
-            bpy.ops.object.group_instance_add(group=group)
-        else:
+    def create_tile(self, group):
+        if group == 'empty':
             bpy.ops.object.empty_add()
+        else:
+            bpy.ops.object.group_instance_add(group=group)
         tile3d = bpy.context.object
         tile3d.empty_draw_size = 0.25
         tile3d.pos = self.cursor.pos

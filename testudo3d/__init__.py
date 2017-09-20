@@ -127,6 +127,16 @@ def mouseover_region(area, event):
                 return True
     return False
 
+def select_all(objs=None):
+    objs = objs or bpy.data.objects
+    for obj in objs:
+        obj.select = True
+
+def deselect_all(objs=None):
+    objs = objs or bpy.data.objects
+    for obj in objs:
+        obj.select = False
+
 def get_children(obj, children=None):
     # recursive
     if not children:
@@ -177,16 +187,6 @@ class T3DProperties(PropertyGroup):
         name="Circle Radius",
         description='Radius of circle',
         default=5
-    )
-    auto_mode = EnumProperty(
-        name='Mode',
-        description='Method used to pick tile when multiple',
-        items=(
-            ('random', 'Random', ''),
-            ('dither', 'Dither', ''),
-            ('first', 'First', ''),
-        ),
-        default='random',
     )
     tilesets = CollectionProperty(
         name='Tilesets',
@@ -249,7 +249,6 @@ class T3DToolsPanel(Panel):
 
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
-        layout.prop(prop, 'auto_mode')
 
         row = layout.row()
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
@@ -357,6 +356,8 @@ class T3DOperatorBase:
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
         T3DOperatorBase.running_modal = False
+        deselect_all()
+        bpy.context.scene.objects.active = self.root_obj
 
     @classmethod
     def poll(cls, context):
@@ -516,8 +517,9 @@ class T3DOperatorBase:
         if context.scene != self.active_scene: return
         mat_world = self.root_obj.matrix_world
         mat_scale = Matrix.Scale(self.tilesize_z, 4, Vector((0.0, 0.0, 1.0)))
-
         mat = mat_world * mat_scale
+
+        bgl.glDisable(bgl.GL_DEPTH_TEST)
 
         color = YELLOW if self.state.select else WHITE
         t_cube = mat_transform_edges(mat, self.select_cube)
@@ -530,7 +532,6 @@ class T3DOperatorBase:
 
         t_arrow = mat_transform(mat, ARROW)
         color = PURPLE if not self.state.grab else GREEN
-        bgl.glDisable(bgl.GL_DEPTH_TEST)
         draw_poly(t_arrow, color)
 
         restore_gl_defaults()
@@ -610,8 +611,10 @@ class ConnectObjects(Operator):
         return context.mode == "OBJECT" and len(context.selected_objects) == 2
 
     def execute(self, context):
-        # obj1, obj2 = context.selected_objects
-        obj1, obj2 = bpy.selection
+        selected = list(context.selected_objects)
+        obj1 = context.scene.objects.active
+        selected.remove(obj1)
+        obj2 = selected[0]
         copy_location = obj1.constraints.new('COPY_LOCATION')
         copy_rotation = obj1.constraints.new('COPY_ROTATION')
         copy_location.target = obj2
@@ -631,42 +634,9 @@ class LinkTile3DLibrary(Operator):
             # link groups
             data_dst.groups = data_src.groups
             self.report({'INFO'}, 'linked {} groups'.format(len(data_src.groups)))
-            # link src scene. assume only has one
-            scene = data_src.scenes[0]
-            data_dst.scenes = [scene] # will this link all groups anyway?
+            # link scenes
+            data_dst.scenes = data_src.scenes
         return {'FINISHED'}
-
-class Selection(Header):
-    # context.selected_objects doesn't respect selection order, so we have to do this...
-    bl_label = "Selection"
-    bl_space_type = "VIEW_3D"
-
-    def __init__(self):
-        self.select()
-
-    # lol
-    def draw(self, context):
-        pass
-
-    @staticmethod
-    def select():
-        selected = bpy.context.selected_objects
-        n = len(selected)
-
-        if n == 0:
-            bpy.selection = []
-        else:
-            if n == 1:
-                bpy.selection = []
-                bpy.selection.append(selected[0])
-            elif n > len(bpy.selection):
-                for obj in selected:
-                    if obj not in bpy.selection:
-                        bpy.selection.append(obj)
-            elif n < len(bpy.selection):
-                for obj in bpy.selection:
-                    if obj not in selected:
-                        bpy.selection.remove(obj)
 
 class SetActiveTile3D(Operator):
     # we need this because modal operator only works for one window
@@ -776,16 +746,6 @@ class AlignTiles(Operator):
             rot = roundbase(rot, 90)
             child.rot = radians(rot)
         return {'FINISHED'}
-
-def select_all(objs=None):
-    objs = objs or bpy.data.objects
-    for obj in objs:
-        obj.select = True
-
-def deselect_all(objs=None):
-    objs = objs or bpy.data.objects
-    for obj in objs:
-        obj.select = False
 
 class T3DSetupTilesOperator(Operator):
     """Setup 3D Tiles for tile library"""
