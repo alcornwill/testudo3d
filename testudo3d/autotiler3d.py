@@ -54,7 +54,7 @@ def parse_rules(path):
                     n__ = copyto[i]
                     rules[d | n__] = Rule(b, (i+1)*-90)
         except ValueError as e:
-            if a == 'dfault':
+            if a == 'default':
                 default = Rule(b or None)
 
     return rules, default
@@ -63,13 +63,6 @@ class AutoTiler3D(Turtle3D):
     def __init__(self, *args, **kw):
         Turtle3D.__init__(self, *args, **kw)
         self.auto_root = None
-
-        # test
-        item = bpy.context.scene.t3d_prop.tilesets.add()
-        item.path = 'popo'
-        item = bpy.context.scene.t3d_prop.tilesets.add()
-        item.path = 'popo2'
-        print("happening")
 
     def init(self):
         Turtle3D.init(self)
@@ -81,8 +74,13 @@ class AutoTiler3D(Turtle3D):
         self.init_rules()
 
     def init_rules(self):
-        path = bpy.context.scene.t3d_prop.rules_path
+        prop = bpy.context.scene.t3d_prop
+        tileset = prop.tilesets[prop.tileset_idx]
+        path = bpy.path.abspath(tileset.path)
         self.rules, self.default = parse_rules(path)
+
+        # for tileset in prop.tilesets:
+            # self.rules[tileset.tileset_name] = parse_rules(tileset.path)
 
     def init_auto_root(self):
         parent = self.root_obj.parent
@@ -137,10 +135,13 @@ class AutoTiler3D(Turtle3D):
         self.root = self.auto_root
         Turtle3D.delete(self)
 
-        if center:
-            rule = (self.rules[bitmask]
-                    if bitmask in self.rules
-                    else self.default)
+        rule = None
+        if bitmask in self.rules:
+            rule = self.rules[bitmask]
+        elif self.default:
+            rule = self.default
+
+        if center and rule:
             automode = bpy.context.scene.t3d_prop.auto_mode
             if automode == 'random':
                 group = choice(rule.tiles)

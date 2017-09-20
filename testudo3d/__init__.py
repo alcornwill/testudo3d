@@ -30,6 +30,7 @@ bl_info = {
 }
 
 import sys
+from os.path import splitext, basename
 import logging
 import bpy
 import bgl
@@ -126,6 +127,15 @@ def mouseover_region(area, event):
                 return True
     return False
 
+def get_children(obj, children=None):
+    # recursive
+    if not children:
+        children = []
+    children += obj.children
+    for child in obj.children:
+        get_children(child, children)
+    return children
+
 class QuitError(Exception):
     # note: not an error
     pass
@@ -141,15 +151,21 @@ class KeyInput:
 class TilesetList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
+        row.label(item.tileset_name)
         row.prop(item, 'path', text="")
         # todo row.operator(SetActiveTileset)
 
 class TilesetPropertyGroup(PropertyGroup):
-    rules_path = StringProperty(
+    path = StringProperty(
         name="Rules Path",
         description="Path to your rules.txt file (for auto-tiling)",
-        subtype="FILE_PATH"
+        subtype="FILE_PATH",
+        default='//tileset1.txt'
     )
+    def get_tileset_name(self):
+        name, ext = splitext(basename(self.path))
+        return name
+    tileset_name = property(get_tileset_name)
 
 class T3DProperties(PropertyGroup):
     tile3d_library_path = StringProperty(
@@ -181,9 +197,103 @@ class T3DProperties(PropertyGroup):
         default=0
     )
 
-class T3DPanel(Panel):
-    bl_idname = "view3d.tilemap3d_panel"
-    bl_label = "Testudo3D Panel"
+class TilesetActionsOperator(bpy.types.Operator):
+    bl_idname = "view3d.t3d_tileset_actions"
+    bl_label = "Tileset Actions"
+
+    action = bpy.props.EnumProperty(
+        items=(
+            ('UP', "Up", ""),
+            ('DOWN', "Down", ""),
+            ('REMOVE', "Remove", ""),
+            ('ADD', "Add", ""),
+        )
+    )
+
+    def invoke(self, context, event):
+        prop = context.scene.t3d_prop
+        idx = prop.tileset_idx
+
+        try:
+            item = prop.tilesets[idx]
+            print("happened")
+        except IndexError:
+            pass
+        else:
+            if self.action == 'DOWN' and idx < len(prop.tilesets) - 1:
+                item_next = prop.tilesets[idx+1].name
+                prop.tileset_idx += 1
+            elif self.action == 'UP' and idx >= 1:
+                item_prev = prop.tilesets[idx-1].name
+                prop.tileset_idx -= 1
+            elif self.action == 'REMOVE':
+                prop.tileset_idx -= 1
+                prop.tilesets.remove(idx)
+        if self.action == 'ADD':
+            item = prop.tilesets.add()
+            prop.tileset_idx += 1
+
+        return {"FINISHED"}
+
+class T3DToolsPanel(Panel):
+    bl_idname = "view3d.t3d_tools_panel"
+    bl_label = "Tools"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'TOOLS'
+    bl_category = "T3D"
+    bl_context = "objectmode"
+
+    def draw(self, context):
+        layout = self.layout
+        prop = context.scene.t3d_prop
+
+        layout.operator(ManualModeOperator.bl_idname)
+        layout.operator(AutoModeOperator.bl_idname)
+        layout.prop(prop, 'auto_mode')
+
+        row = layout.row()
+        row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
+
+        col = row.column(align=True)
+        col.enabled = not T3DOperatorBase.running_modal
+        col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMIN', text="").action = 'ADD'
+        col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMOUT', text="").action = 'REMOVE'
+        col.separator()
+        col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_UP', text="").action = 'UP'
+        col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_DOWN', text="").action = 'DOWN'
+
+        layout.separator()
+        self.display_selected_tile3d(context)
+        layout.operator(SetActiveTile3D.bl_idname)
+        layout.operator(CursorToSelected.bl_idname)
+
+    def display_selected_tile3d(self, context):
+        obj = context.object
+        if obj:
+            self.layout.label("selected: {}".format(obj.group))
+
+class T3DDrawingPanel(Panel):
+    bl_idname = "view3d.t3d_drawing_panel"
+    bl_label = "Drawing"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'TOOLS'
+    bl_category = "T3D"
+    bl_context = "objectmode"
+
+    def draw(self, context):
+        layout = self.layout
+        prop = context.scene.t3d_prop
+
+        layout.operator(T3DDown.bl_idname)
+        layout.operator(T3DUp.bl_idname)
+        layout.operator(Goto3DCursor.bl_idname)
+        row = layout.row(align=True)
+        row.operator(T3DCircle.bl_idname)
+        row.prop(prop, 'circle_radius')
+
+class T3DUtilsPanel(Panel):
+    bl_idname = "view3d.t3d_utils_panel"
+    bl_label = "Utils"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'TOOLS'
     bl_category = "T3D"
@@ -198,33 +308,9 @@ class T3DPanel(Panel):
         sub.scale_x = 3.0
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
-        layout.operator(ManualModeOperator.bl_idname)
-        layout.operator(AutoModeOperator.bl_idname)
-        layout.prop(prop, 'auto_mode')
-        # todo operator AddTileset RemoveTileset
-        layout.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
-        layout.separator()
-        self.display_selected_tile3d(context)
-        layout.operator(SetActiveTile3D.bl_idname)
-        layout.operator(CursorToSelected.bl_idname)
-        layout.separator()
-        layout.label('drawing')
-        layout.operator(T3DDown.bl_idname)
-        layout.operator(T3DUp.bl_idname)
-        layout.operator(Goto3DCursor.bl_idname)
-        row = layout.row(align=True)
-        row.operator(T3DCircle.bl_idname)
-        row.prop(prop, 'circle_radius')
-        layout.separator()
-        layout.label('misc')
         layout.operator(T3DSetupTilesOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         layout.operator(ConnectObjects.bl_idname)
-
-    def display_selected_tile3d(self, context):
-        obj = context.object
-        if obj:
-            self.layout.label("selected: {}".format(obj.group))
 
 class T3DOperatorBase:
     running_modal = False
@@ -264,6 +350,9 @@ class T3DOperatorBase:
             KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True)
         ]
 
+    def __del__(self):
+        self.on_quit()
+
     def on_quit(self):
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
@@ -272,6 +361,9 @@ class T3DOperatorBase:
     @classmethod
     def poll(cls, context):
         return not T3DOperatorBase.running_modal
+
+    def cancel(self, context):
+        self.on_quit()
 
     def modal(self, context, event):
         context.area.tag_redraw()
@@ -484,6 +576,15 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     bl_idname = "view3d.t3d_auto"
     bl_label = "Auto Mode"
 
+    @classmethod
+    def poll(cls, context):
+        prop = context.scene.t3d_prop
+        try:
+            tileset = prop.tilesets[prop.tileset_idx]
+        except IndexError:
+            return False
+        return T3DOperatorBase.poll(context)
+
     def __init__(self):
         AutoTiler3D.__init__(self)
         T3DOperatorBase.__init__(self)
@@ -676,12 +777,14 @@ class AlignTiles(Operator):
             child.rot = radians(rot)
         return {'FINISHED'}
 
-def select_all():
-    for obj in bpy.data.objects:
+def select_all(objs=None):
+    objs = objs or bpy.data.objects
+    for obj in objs:
         obj.select = True
 
-def deselect_all():
-    for obj in bpy.data.objects:
+def deselect_all(objs=None):
+    objs = objs or bpy.data.objects
+    for obj in objs:
         obj.select = False
 
 class T3DSetupTilesOperator(Operator):
@@ -702,16 +805,19 @@ class T3DSetupTilesOperator(Operator):
         return {'FINISHED'}
 
     def remove_all_groups(self):
-        select_all()
-        for group in self.objects:
-            bpy.ops.group.objects_remove_all()
+        deselect_all()
+        select_all(self.objects)
+        bpy.ops.group.objects_remove_all()
         deselect_all()
 
     def create_groups(self):
         for obj in self.objects:
+            children = get_children(obj)
             group = bpy.data.groups.new(name=obj.name)
             group.name = obj.name  # insist
             group.objects.link(obj)
+            for child in children:
+                group.objects.link(child)
             group.dupli_offset = obj.location
 
     def layout_in_grid(self, border=2):
@@ -738,7 +844,7 @@ class T3DSetupTilesOperator(Operator):
                 obj.name = obj.name.replace(' ', '_')
 
     def setup_tiles(self):
-        self.objects = [obj for obj in bpy.data.objects if obj.type == 'MESH']
+        self.objects = [obj for obj in bpy.context.scene.objects if not obj.parent and not obj.hide]
         self.rename_objects()
         self.layout_in_grid()
         self.remove_all_groups()
