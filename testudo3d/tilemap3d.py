@@ -211,8 +211,8 @@ class Tilemap3D:
         self.manual_mode = True # hacky
 
         # init
-        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
 
