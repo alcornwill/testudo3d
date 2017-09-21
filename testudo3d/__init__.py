@@ -30,7 +30,7 @@ bl_info = {
 }
 
 import sys
-from os.path import splitext, basename
+from os.path import splitext, basename, dirname, join
 import logging
 import bpy
 import bgl
@@ -78,6 +78,11 @@ FONT_ID = 0  # hmm
 addon_keymaps = []
 
 text_cursor = Vec2(0, 0)  # used for UI
+
+
+def writelines(path, lines):
+    with open(path, 'w') as f:
+        f.writelines(lines)
 
 def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
@@ -127,6 +132,14 @@ def mouseover_region(area, event):
                 return True
     return False
 
+def create_group_instance(group_name):
+    group = bpy.data.groups[group_name]
+    bpy.ops.object.empty_add()
+    empty = bpy.context.object
+    empty.dupli_type = 'GROUP'
+    empty.dupli_group = group
+    return empty
+
 def select_all(objs=None):
     objs = objs or bpy.data.objects
     for obj in objs:
@@ -163,7 +176,6 @@ class TilesetList(UIList):
         row = layout.row(align=True)
         row.label(item.tileset_name)
         row.prop(item, 'path', text="")
-        # todo row.operator(SetActiveTileset)
 
 class TilesetPropertyGroup(PropertyGroup):
     path = StringProperty(
@@ -193,8 +205,21 @@ class T3DProperties(PropertyGroup):
         description='Tilesets (for auto-tiling)',
         type=TilesetPropertyGroup
     )
+    idx = 0
+    def getidx(self):
+        return T3DProperties.idx
+    def setidx(self, value):
+        T3DProperties.idx = value
+        t3d.tileset = self.tilesets[self.tileset_idx]
     tileset_idx = IntProperty(
-        default=0
+        default=0,
+        get=getidx,
+        set=setidx,
+    )
+    roomgen_name = StringProperty(
+        name='Name',
+        description='Name of tileset to be generated',
+        default='tileset'
     )
 
 class TilesetActionsOperator(bpy.types.Operator):
@@ -254,22 +279,12 @@ class T3DToolsPanel(Panel):
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
 
         col = row.column(align=True)
-        col.enabled = not T3DOperatorBase.running_modal
+        col.enabled = not T3DOperatorBase.running_modal or not t3d.manual_mode
         col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMIN', text="").action = 'ADD'
         col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMOUT', text="").action = 'REMOVE'
         col.separator()
         col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_UP', text="").action = 'UP'
         col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_DOWN', text="").action = 'DOWN'
-
-        layout.separator()
-        self.display_selected_tile3d(context)
-        layout.operator(SetActiveTile3D.bl_idname)
-        layout.operator(CursorToSelected.bl_idname)
-
-    def display_selected_tile3d(self, context):
-        obj = context.object
-        if obj:
-            self.layout.label("selected: {}".format(obj.group))
 
 class T3DDrawingPanel(Panel):
     bl_idname = "view3d.t3d_drawing_panel"
@@ -283,12 +298,21 @@ class T3DDrawingPanel(Panel):
         layout = self.layout
         prop = context.scene.t3d_prop
 
-        layout.operator(T3DDown.bl_idname)
-        layout.operator(T3DUp.bl_idname)
+        self.display_selected_tile3d(context)
+        layout.operator(SetActiveTile3D.bl_idname)
+        row = layout.row(align=True)
+        row.operator(T3DDown.bl_idname)
+        row.operator(T3DUp.bl_idname)
+        layout.operator(CursorToSelected.bl_idname)
         layout.operator(Goto3DCursor.bl_idname)
         row = layout.row(align=True)
         row.operator(T3DCircle.bl_idname)
         row.prop(prop, 'circle_radius')
+
+    def display_selected_tile3d(self, context):
+        obj = context.object
+        if obj:
+            self.layout.label("selected: {}".format(obj.group))
 
 class T3DUtilsPanel(Panel):
     bl_idname = "view3d.t3d_utils_panel"
@@ -308,6 +332,9 @@ class T3DUtilsPanel(Panel):
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
         layout.operator(T3DSetupTilesOperator.bl_idname)
+        col = layout.column(align=True)
+        col.operator(RoomGenOperator.bl_idname)
+        col.prop(prop, 'roomgen_name', text='')
         layout.operator(AlignTiles.bl_idname)
         layout.operator(ConnectObjects.bl_idname)
 
@@ -648,6 +675,7 @@ class SetActiveTile3D(Operator):
     @classmethod
     def poll(cls, context):
         if not T3DOperatorBase.running_modal: return False
+        if not t3d.manual_mode: return False
         obj = context.object
         if obj is None: return False
         # assume is group instance
@@ -730,6 +758,7 @@ class T3DCircle(Operator):
 class AlignTiles(Operator):
     bl_idname = 'view_3d.t3d_align_tiles'
     bl_label = 'Align Tiles'
+    bl_description = 'Align tiles to grid'
 
     @classmethod
     def poll(cls, context):
@@ -810,6 +839,65 @@ class T3DSetupTilesOperator(Operator):
         self.remove_all_groups()
         self.create_groups()
 
+class RoomGenOperator(Operator):
+    bl_idname = 'view3d.t3d_room_gen'
+    bl_label = 'Room Gen'
+    bl_description = 'Generate tileset from "Wall", "Floor" and "Ceiling"'
+
+    masks = (
+        0b0000,
+        0b0001,
+        0b0011,
+        0b0101,
+        0b0111,
+        0b1111
+    )
+
+    def execute(self, context):
+        name = context.scene.t3d_prop.roomgen_name
+        self.make_tileset(name, 'Wall', 'Ceiling', 'Floor') # make wall, floor, ceiling configurable?
+        return {'FINISHED'}
+
+    def make_tileset(self, name, wall, ceiling, floor):
+        index = 0
+        lines = []
+        for j in range(4):
+            c = j & 0b01
+            f = j & 0b10
+            for m in self.masks:
+                objs = []
+                # walls
+                for i in range(4):
+                    w = m & 1 << i
+                    if not w:
+                        obj = create_group_instance(wall)
+                        obj.rotation_euler.z = radians(i * -90)
+                        objs.append(obj)
+                # ceiling
+                if not c:
+                    obj = create_group_instance(ceiling)
+                    objs.append(obj)
+                # floor
+                if not f:
+                    obj = create_group_instance(floor)
+                    objs.append(obj)
+
+                if not objs: continue
+                bpy.ops.object.empty_add()
+                empty = bpy.context.object
+                empty.name = name + str(index)
+                for obj in objs:
+                    obj.parent = empty
+
+                rule = (j << 4) | m
+                rulestr = "{} {}\n".format(format(rule, '06b'), empty.name)
+                lines.append(rulestr)
+
+                index += 1
+
+        blenddir = dirname(bpy.data.filepath)
+        writelines(join(blenddir, name + '.txt'), lines)
+
 def register():
     bpy.utils.register_module(__name__)
     bpy.types.Scene.t3d_prop = PointerProperty(type=T3DProperties)
@@ -820,6 +908,10 @@ def register():
     if wm.keyconfigs.addon is None: return
     km = wm.keyconfigs.addon.keymaps.new(name='Object Mode', space_type='EMPTY')
     km.keymap_items.new(SetActiveTile3D.bl_idname, 'S', 'PRESS')
+    # you could do this for all controls, then they'd be configurable
+    # but then you'd have to create thousands of operators?
+    # (there is a 'modal keymap'?. can't find documentation)
+    # https://docs.blender.org/api/blender_python_api_2_70_5/bpy.types.KeyMapItem.html#bpy.types.KeyMapItem
     addon_keymaps.append(km)
 
 def unregister():

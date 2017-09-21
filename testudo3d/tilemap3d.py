@@ -121,6 +121,9 @@ class Cursor:
 
     forward = property(get_forward)
 
+    def copy(self):
+        return Cursor(self.tile3d, self.pos.copy(), self.rot)
+
     def serialize(self):
         return "{tile3d},{x},{y},{z},{rot}".format(
             tile3d=self.tile3d,
@@ -168,6 +171,24 @@ class Tile3DFinder:
     def get_tiles_at(self, pos):
         return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
 
+class FinderManager:
+    # todo
+    # my thinking is that
+    # a lot of the time you don't need to reconstruct the KDTree
+    # even though you should, because you're looking at different cells
+    def __init__(self):
+        self.finder = None # also need one for each root
+        self.invalidated = False
+
+    def get_tiles_at(self, pos):
+        if self.invalidated:
+            self.finder = Tile3DFinder()
+            self.invalidated = False
+        return self.finder.get_tiles_at(pos)
+
+    def invalidate(self):
+        self.invalidated = True
+
 class PaintModeState:
     paint = False
     delete = False
@@ -186,6 +207,8 @@ class Tilemap3D:
         self.select_start_pos = None
         self.grabbed = None
         self.clipboard = None
+        # self.finder = FinderManager()
+        self.manual_mode = True # hacky
 
         # init
         # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)

@@ -78,6 +78,11 @@ def parse_rules(path):
 class AutoTiler3D(Turtle3D):
     def __init__(self, *args, **kw):
         Turtle3D.__init__(self, *args, **kw)
+        self.tileset_ = None
+        self.manual_mode = False
+
+        prop = bpy.context.scene.t3d_prop
+        prop.tileset_idx = prop.tileset_idx # give it a kick
 
     def init(self):
         Turtle3D.init(self)
@@ -85,11 +90,6 @@ class AutoTiler3D(Turtle3D):
         self.init_rules()
 
     def init_rules(self):
-        tileset = self.get_active_tileset()
-        self.cursor.tile3d = tileset.tileset_name # todo update in modal()
-        # would be nice to change draw 2D callback to change color
-        # Cursor.draw_2d()?
-
         prop = bpy.context.scene.t3d_prop
         self.rulesets = {}
         for tileset in prop.tilesets:
@@ -115,6 +115,13 @@ class AutoTiler3D(Turtle3D):
         if parent:
             self.auto_root.parent = parent
 
+    def get_tileset(self):
+        return self.tileset_
+    def set_tileset(self, tileset):
+        self.tileset_ = tileset
+        self.cursor.tile3d = tileset.tileset_name
+    tileset = property(get_tileset, set_tileset)
+
     def delete(self):
         # hmm this will slow down region operations and stuff... avoidable?
         Turtle3D.delete(self)
@@ -123,7 +130,7 @@ class AutoTiler3D(Turtle3D):
     def paint(self):
         Turtle3D.delete(self)
         tile3d = self.create_tile('empty')
-        tile3d[CUSTOM_PROP_TILESET] = self.get_active_tileset().tileset_name
+        tile3d[CUSTOM_PROP_TILESET] = self.tileset.tileset_name
         self.do_auto_tiling()
 
     def get_occupied(self):
@@ -133,17 +140,12 @@ class AutoTiler3D(Turtle3D):
         return center, adjacent
 
     def do_auto_tiling(self):
-        tileset = self.get_active_tileset()
-        self.auto_tiling(tileset.tileset_name)
+        self.auto_tiling(self.tileset.tileset_name)
         # repaint adjacent
         orig_pos = self.cursor.pos
         for vec in ADJACENCY_VECTORS:
             cursor = Cursor(None, orig_pos + vec, 0)
             self.do_with_cursor(cursor, self.auto_tiling)
-
-    def get_active_tileset(self):
-        prop = bpy.context.scene.t3d_prop
-        return prop.tilesets[prop.tileset_idx]
 
     def auto_tiling(self, tileset=None):
         # check adjacent cells if occupied

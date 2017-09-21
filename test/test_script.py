@@ -24,10 +24,10 @@ class T3DTest:
 
     def test_init(self):
         import logging
-        # from testudo3d import AutoTiler3D
-        # t3d = AutoTiler3D(logging_level=logging.DEBUG)
-        from testudo3d import Turtle3D
-        t3d = Turtle3D(logging_level=logging.DEBUG)
+        from testudo3d import AutoTiler3D
+        t3d = AutoTiler3D(logging_level=logging.DEBUG)
+        # from testudo3d import Turtle3D
+        # t3d = Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
@@ -137,57 +137,75 @@ class TurtleTest(T3DTest):
 
     def execute(self):
         t3d.cursor.tile3d = 'Suzanne'
-        # self.basic()
-        self.snake_kolam()
 
-    def basic(self):
+        # # Weed-1
+        # self.lsys(
+        #     depth=3,
+        #     length=7.5,
+        #     angle=25,
+        #     axiom='f',
+        #     rules={'f':'f[-f]f[+f]f'}
+        # )
+
+        # # Quadric-Koch-Island
+        # self.lsys(
+        #     depth=2,
+        #     length=3,
+        #     angle=90,
+        #     axiom='f-f-f-f',
+        #     rules={'f':'f-f+f+ff-f-f+f'}
+        # )
+
+        # Sierpinski-Square
+        self.lsys(
+            depth=2,
+            length=2,
+            angle=90,
+            axiom='f-f-f-f',
+            rules={'f':'ff[-f-f-f]f'}
+        )
+
+    def lsys(self, depth, rules, angle, length, axiom):
+        # l-system
+        # The Computational Beauty of Nature, Gary William Flake, p76-92
+        stack = []
+        def right():
+            t3d.right(angle)
+        def left():
+            t3d.left(angle)
+        def forward():
+            t3d.forward(length)
+        def go():
+            t3d.up()
+            t3d.forward(length)
+            t3d.down()
+        def push():
+            stack.append(t3d.cursor.copy())
+        def pop():
+            t3d.cursor = stack.pop()
+        # hmm, how to get depth for |?
+
+        # todo |, f[number], g[number]
+        commands = {"-": right, "+": left, "f": forward, 'g': go,'[': push, ']': pop}
+        axiom = self.replace(axiom, rules, depth)
+
         t3d.down()
-        t3d.forward(7.5)
-        t3d.left(45)
-        t3d.forward(7.5)
-        t3d.left(45)
-        t3d.forward(7.5)
+        self.draw(axiom, commands)
 
-    def snake_kolam(self):
-        # Python36\Lib\turtledemo\lindenmayer.py
+    def replace_(self, seq, rules):
+        newseq = ""
+        for cmd in seq:
+            newseq = newseq + rules.get(cmd, cmd)
+        return newseq
 
-        def r():
-            t3d.right(45)
-
-        def l():
-            t3d.left(45)
-
-        def f():
-            t3d.forward(3)
-
-        snake_rules = {"-":r, "+":l, "f":f, "b":"f+f+f--f--f+f+f"}
-        snake_replacementRules = {"b": "b+f+b--f--b+f+b"}
-        snake_start = "b--f--b--f"
-
-        drawing = self.replace(snake_start, snake_replacementRules, 2)
-
-        t3d.root_obj.location.x = 0.5
-        t3d.root_obj.location.y = -0.5
-        t3d.setx(1)
-        t3d.sety(-36)
-        t3d.down()
-        self.draw(drawing, snake_rules)
-
-    def replace(self, seq, replacementRules, n):
-        for i in range(n):
-            newseq = ""
-            for element in seq:
-                newseq = newseq + replacementRules.get(element,element)
-            seq = newseq
+    def replace(self, seq, rules, depth):
+        for i in range(depth):
+            seq = self.replace_(seq, rules)
         return seq
 
-    def draw(self, commands, rules):
-        for b in commands:
-            result = rules[b]
-            if callable(result):
-                result()
-            else:
-                self.draw(result, rules)
+    def draw(self, sequence, commands):
+        for command in sequence:
+            commands[command]()
 
 class CellularAutomataTest(T3DTest):
     name = "cellular_automata_test"
