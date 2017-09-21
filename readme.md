@@ -1,10 +1,8 @@
 # Testudo3D (formerly Modular Building Tool)
 #[VIDEO](https://www.youtube.com/watch?v=4p2CRIq-Aa0)  
 blender addon with 3D tilemap and turtle graphics API  
-(no auto-tiling yet)  
 to access from blender console, type
 ```t3d = C.scene.t3d```  
-(t3d will only be available when in 'manual mode')
 
 ### Controls
 * __cursor keys__ move the 3d cursor arrow

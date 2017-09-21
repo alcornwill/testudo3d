@@ -1,0 +1,24 @@
+
+# T3D rules file
+# lines starting with '#' will be ignored
+
+# for i in range(64):
+#     print(format(i, '06b'))
+
+DUWSEN
+default junction_white
+000000 pipe_H
+000001 pipe_H
+000011 pipe_elbow_H
+000101 pipe_H
+000111 pipe_T_H
+001111 pipe_cross_H
+010000 pipe_V
+010001 pipe_elbow_V_up
+010101 pipe_T_H_up
+100000 pipe_V
+100001 pipe_elbow_V_down
+100101 pipe_T_H_down
+110000 pipe_V
+110001 pipe_T_V
+110101 pipe_cross_V
