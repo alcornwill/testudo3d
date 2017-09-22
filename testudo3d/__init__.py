@@ -132,9 +132,16 @@ def mouseover_region(area, event):
                 return True
     return False
 
+def make_linked_duplicate(src):
+    obj = src.copy()
+    if src.data:
+        obj.data = src.data.copy()
+    bpy.context.scene.objects.link(obj)
+    return obj
+
 def create_group_instance(group_name):
     group = bpy.data.groups[group_name]
-    bpy.ops.object.empty_add()
+    bpy.ops.object.empty_add(name=group_name)
     empty = bpy.context.object
     empty.dupli_type = 'GROUP'
     empty.dupli_group = group
@@ -159,6 +166,33 @@ def get_children(obj, children=None):
         get_children(child, children)
     return children
 
+def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
+    a = Vector((x_min, y_min, z_min))
+    b = Vector((x_max, y_min, z_min))
+    c = Vector((x_max, y_max, z_min))
+    d = Vector((x_min, y_max, z_min))
+    e = Vector((x_min, y_min, z_max))
+    f = Vector((x_max, y_min, z_max))
+    g = Vector((x_max, y_max, z_max))
+    h = Vector((x_min, y_max, z_max))
+
+    return [
+        (a, b),
+        (b, c),
+        (c, d),
+        (d, a),
+
+        (e, f),
+        (f, g),
+        (g, h),
+        (h, e),
+
+        (a, e),
+        (b, f),
+        (c, g),
+        (d, h)
+    ]
+
 class QuitError(Exception):
     # note: not an error
     pass
@@ -178,6 +212,7 @@ class TilesetList(UIList):
         row.prop(item, 'path', text="")
 
 class TilesetPropertyGroup(PropertyGroup):
+    # todo allow use text data-block
     path = StringProperty(
         name="Rules Path",
         description="Path to your rules.txt file (for auto-tiling)",
@@ -335,6 +370,7 @@ class T3DUtilsPanel(Panel):
         col = layout.column(align=True)
         col.operator(RoomGenOperator.bl_idname)
         col.prop(prop, 'roomgen_name', text='')
+        layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         layout.operator(ConnectObjects.bl_idname)
 
@@ -430,6 +466,16 @@ class T3DOperatorBase:
         self._handle_2d = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_2d, args, 'WINDOW', 'POST_PIXEL')
         context.window_manager.modal_handler_add(self)
 
+    def handle_input(self, event):
+        for keyinput in self.input_map:
+            if (keyinput.shift and not event.shift or
+                keyinput.ctrl and not event.ctrl):
+                continue
+            if keyinput.type == event.type and keyinput.value == event.value:
+                keyinput.func()
+                return {'RUNNING_MODAL'}
+        return {'PASS_THROUGH'}
+
     def handle_quit(self):
         if self.state.grab:
             self.end_grab(cancel=True)
@@ -469,6 +515,10 @@ class T3DOperatorBase:
         bpy.ops.ed.undo_push()
 
     def handle_grab(self):
+        if not self.manual_mode:
+            # todo
+            self.report({'WARNING'}, 'Grab not implemented for Auto Mode')
+            return
         if not self.state.grab:
             self.start_grab()
         else:
@@ -492,53 +542,15 @@ class T3DOperatorBase:
             # cancel
             self.end_select()
 
-    def handle_input(self, event):
-        for keyinput in self.input_map:
-            if (keyinput.shift and not event.shift or
-                keyinput.ctrl and not event.ctrl):
-                continue
-            if keyinput.type == event.type and keyinput.value == event.value:
-                keyinput.func()
-                return {'RUNNING_MODAL'}
-        return {'PASS_THROUGH'}
-
     def construct_select_cube(self):
         logging.debug('construct select cube')
         if self.state.select:
             cube_min, cube_max = self.select_cube_bounds()
         else:
             cube_min, cube_max = self.cursor.pos, self.cursor.pos
-        self.select_cube = self.construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
-                                                     cube_min.y - 0.5, cube_max.y + 0.5,
-                                                     cube_min.z, cube_max.z + 1.0)
-
-    @staticmethod
-    def construct_cube_edges(x_min, x_max, y_min, y_max, z_min, z_max):
-        a = Vector((x_min, y_min, z_min))
-        b = Vector((x_max, y_min, z_min))
-        c = Vector((x_max, y_max, z_min))
-        d = Vector((x_min, y_max, z_min))
-        e = Vector((x_min, y_min, z_max))
-        f = Vector((x_max, y_min, z_max))
-        g = Vector((x_max, y_max, z_max))
-        h = Vector((x_min, y_max, z_max))
-
-        return [
-            (a, b),
-            (b, c),
-            (c, d),
-            (d, a),
-
-            (e, f),
-            (f, g),
-            (g, h),
-            (h, e),
-
-            (a, e),
-            (b, f),
-            (c, g),
-            (d, h)
-        ]
+        self.select_cube = construct_cube_edges(cube_min.x - 0.5, cube_max.x + 0.5,
+                                                cube_min.y - 0.5, cube_max.y + 0.5,
+                                                cube_min.z, cube_max.z + 1.0)
 
     def draw_callback_3d(self, context):
         if context.scene != self.active_scene: return
@@ -885,7 +897,7 @@ class RoomGenOperator(Operator):
                 if not objs: continue
                 bpy.ops.object.empty_add()
                 empty = bpy.context.object
-                empty.name = name + str(index)
+                empty.name = name + format(index, '03d')
                 for obj in objs:
                     obj.parent = empty
 
@@ -897,6 +909,32 @@ class RoomGenOperator(Operator):
 
         blenddir = dirname(bpy.data.filepath)
         writelines(join(blenddir, name + '.txt'), lines)
+
+class MakeTilesRealOperator(Operator):
+    bl_idname = 'view3d.t3d_make_tiles_real'
+    bl_label = 'Make Tiles Real'
+    bl_description = 'Edit details on one tile without affecting the rest (destructive)'
+
+    @classmethod
+    def poll(cls, context):
+        return not T3DOperatorBase.running_modal
+
+    def execute(self, context):
+        # todo operate on all tiles (custom property t3d_tile)
+        # for now, operates on selected (maybe better anyway)
+        selected = bpy.context.selected_objects
+        for tile in selected:
+            pos = tile.location.copy()
+            rot = tile.rotation_euler.copy()
+            group = tile.dupli_group
+            for obj in group.objects:
+                if tile.name.startswith(obj.name): continue # ignore root empty
+                new = make_linked_duplicate(obj)
+                new.parent = None
+                new.location = new.location + pos
+                new.rotation_euler.rotate(rot)
+            bpy.data.objects.remove(tile, do_unlink=True)
+        return {'FINISHED'}
 
 def register():
     bpy.utils.register_module(__name__)

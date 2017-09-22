@@ -122,9 +122,9 @@ class AutoTiler3D(Turtle3D):
         self.cursor.tile3d = tileset.tileset_name
     tileset = property(get_tileset, set_tileset)
 
-    def delete(self):
+    def delete(self, ignore=None):
         # hmm this will slow down region operations and stuff... avoidable?
-        Turtle3D.delete(self)
+        Turtle3D.delete(self, ignore)
         self.do_auto_tiling()
 
     def paint(self):

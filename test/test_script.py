@@ -4,7 +4,7 @@ import os
 import sys
 
 tests = {}
-RESULTS_DIR = "results"
+RESULTS_DIR = r"..\results"
 # NOTE: requires blender in PATH
 COMMAND ='blender --background test.blend --python test_script.py -- --test {}'
 
@@ -24,10 +24,10 @@ class T3DTest:
 
     def test_init(self):
         import logging
-        from testudo3d import AutoTiler3D
-        t3d = AutoTiler3D(logging_level=logging.DEBUG)
-        # from testudo3d import Turtle3D
-        # t3d = Turtle3D(logging_level=logging.DEBUG)
+        # from testudo3d import AutoTiler3D
+        # t3d = AutoTiler3D(logging_level=logging.DEBUG)
+        from testudo3d import Turtle3D
+        t3d = Turtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
@@ -39,7 +39,7 @@ class T3DTest:
             if not os.path.exists(RESULTS_DIR):
                 os.makedirs(RESULTS_DIR)
             blend_path = os.path.join(RESULTS_DIR, self.name + ".blend")
-            bpy.ops.wm.save_as_mainfile(filepath=blend_path, relative_remap=False)
+            bpy.ops.wm.save_as_mainfile(filepath=blend_path, relative_remap=False) # relative_remap doesn't work?
 
 class CircleTest(T3DTest):
     name = "circle_test"
@@ -138,14 +138,14 @@ class TurtleTest(T3DTest):
     def execute(self):
         t3d.cursor.tile3d = 'Suzanne'
 
-        # # Weed-1
-        # self.lsys(
-        #     depth=3,
-        #     length=7.5,
-        #     angle=25,
-        #     axiom='f',
-        #     rules={'f':'f[-f]f[+f]f'}
-        # )
+        # Weed-1
+        self.lsys(
+            depth=3,
+            length=7.5,
+            angle=25,
+            axiom='f',
+            rules={'f':'f[-f]f[+f]f'}
+        )
 
         # # Quadric-Koch-Island
         # self.lsys(
@@ -156,14 +156,14 @@ class TurtleTest(T3DTest):
         #     rules={'f':'f-f+f+ff-f-f+f'}
         # )
 
-        # Sierpinski-Square
-        self.lsys(
-            depth=2,
-            length=2,
-            angle=90,
-            axiom='f-f-f-f',
-            rules={'f':'ff[-f-f-f]f'}
-        )
+        # # Sierpinski-Square
+        # self.lsys(
+        #     depth=2,
+        #     length=2,
+        #     angle=90,
+        #     axiom='f-f-f-f',
+        #     rules={'f':'ff[-f-f-f]f'}
+        # )
 
     def lsys(self, depth, rules, angle, length, axiom):
         # l-system

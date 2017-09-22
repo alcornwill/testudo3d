@@ -152,7 +152,7 @@ class Clipboard:
     def __init__(self, tile3d):
         self.group = tile3d.group
         self.pos_offset = tile3d.pos - t3d.cursor.pos
-        self.rot_offset = tile3d.rot - radians(t3d.cursor.rot)
+        self.rot = tile3d.rot
 
 class Tile3DFinder:
     def __init__(self):
@@ -280,13 +280,6 @@ class Tilemap3D:
         bpy.data.objects.remove(obj, True)
         logging.debug("deleted 1 object")
 
-    def delete_tiles(self, objs):
-        # use this when you can, saves calling update_3dview
-        if not any(objs): return
-        for obj in objs:
-            bpy.data.objects.remove(obj, True)
-        logging.debug("deleted {} objects".format(len(objs)))
-
     def _cdraw(self):
         if self.state.paint:
             self.paint()
@@ -391,7 +384,7 @@ class Tilemap3D:
         if self.clipboard:
             for item in self.clipboard:
                 pos = self.cursor.pos + item.pos_offset
-                rot = degrees(item.rot_offset)
+                rot = degrees(item.rot)
                 cursor = Cursor(item.group, pos, rot)
                 self.do_with_cursor(cursor, self.paint)
         logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
