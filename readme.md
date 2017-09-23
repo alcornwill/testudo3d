@@ -1,7 +1,7 @@
-# Testudo3D
+# Testudo3D ![logo](https://imgur.com/g1MLeYk.png)
 
 ![pipes](https://i.imgur.com/gd3iGIF.png)
-###[VIDEO](https://www.youtube.com/watch?v=4p2CRIq-Aa0)  
+# [VIDEO](https://www.youtube.com/watch?v=4p2CRIq-Aa0)  
 blender addon with 3D tilemap and turtle graphics API  
 to access from blender console, type
 ```t3d = C.scene.t3d```  
