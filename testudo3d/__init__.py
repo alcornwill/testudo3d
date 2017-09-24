@@ -241,12 +241,13 @@ class T3DProperties(PropertyGroup):
         description='Tilesets (for auto-tiling)',
         type=TilesetPropertyGroup
     )
-    idx = 0
+    idx = -1
     def getidx(self):
         return T3DProperties.idx
     def setidx(self, value):
         T3DProperties.idx = value
-        t3d.tileset = self.tilesets[self.tileset_idx]
+        if T3DOperatorBase.running_modal:
+            t3d.tileset = self.tilesets[self.tileset_idx]
     tileset_idx = IntProperty(
         default=0,
         get=getidx,
@@ -256,6 +257,22 @@ class T3DProperties(PropertyGroup):
         name='Name',
         description='Name of tileset to be generated',
         default='tileset'
+    )
+    ul = 0
+    def get_user_layer(self):
+        return T3DProperties.ul
+    def set_user_layer(self, value):
+        T3DProperties.ul = value
+        if T3DOperatorBase.running_modal:
+            t3d.layer = value
+    user_layer = IntProperty(
+        name='Layer',
+        min=0,
+        max=9,
+        description='Layer to work in',
+        default=0,
+        get=get_user_layer,
+        set=set_user_layer
     )
 
 class TilesetActionsOperator(bpy.types.Operator):
@@ -310,6 +327,7 @@ class T3DToolsPanel(Panel):
 
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
+        layout.prop(prop, 'user_layer')
 
         row = layout.row()
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
@@ -417,11 +435,12 @@ class T3DOperatorBase:
         self.on_quit()
 
     def on_quit(self):
+        if not T3DOperatorBase.running_modal: return
+        T3DOperatorBase.running_modal = False
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
         bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
-        T3DOperatorBase.running_modal = False
         deselect_all()
-        bpy.context.scene.objects.active = self.root_obj
+        bpy.context.scene.objects.active = self.root
 
     @classmethod
     def poll(cls, context):
@@ -555,7 +574,7 @@ class T3DOperatorBase:
 
     def draw_callback_3d(self, context):
         if context.scene != self.active_scene: return
-        mat_world = self.root_obj.matrix_world
+        mat_world = self.root.matrix_world
         mat_scale = Matrix.Scale(self.tilesize_z, 4, Vector((0.0, 0.0, 1.0)))
         mat = mat_world * mat_scale
 
@@ -780,7 +799,7 @@ class AlignTiles(Operator):
 
     def execute(self, context):
         # for every child, align to grid
-        for child in t3d.root_obj.children:
+        for child in t3d.root.children:
             vec = child.pos
             round_vector(vec)
             child.pos = vec

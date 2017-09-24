@@ -156,11 +156,7 @@ class Clipboard:
 
 class Tile3DFinder:
     def __init__(self):
-        self.kd = None
-        self.childs = None
-
-        # init
-        self.childs = t3d.root.children
+        self.childs = [c for c in t3d.root.children if c.layers[t3d.layer]]
         size = len(self.childs)
         self.kd = KDTree(size)
 
@@ -199,8 +195,8 @@ class PaintModeState:
 
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
-        self.root_obj = None
-        self.root = None # 'active root'
+        self.root = None
+        self.layer = None # active layer
         self.tilesize_z = 1.0
         self.cursor = Cursor()
         self.state = PaintModeState()
@@ -211,34 +207,45 @@ class Tilemap3D:
         self.manual_mode = True # hacky
 
         # init
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
+
+    def get_layer(self):
+        return bpy.context.scene.t3d_prop.user_layer
+    user_layer = property(get_layer)
 
     def init(self):
         self.init_root_obj()
         self.construct_select_cube()
+        self.layer = self.user_layer
 
     def init_root_obj(self):
-        self.root_obj = bpy.context.object
-        if self.root_obj is None:
+        self.root = bpy.context.object
+        if self.root is None:
             bpy.ops.object.empty_add()
-            self.root_obj = bpy.context.object
-            self.root_obj.name = 'Root'
-        if CUSTOM_PROP_TILE_SIZE_Z not in self.root_obj:
-            self.root_obj[CUSTOM_PROP_TILE_SIZE_Z] = 1.0
-        self.tilesize_z = self.root_obj[CUSTOM_PROP_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
-        if CUSTOM_PROP_LAST_CURSOR in self.root_obj:
-            self.cursor = Cursor.deserialize(self.root_obj[CUSTOM_PROP_LAST_CURSOR])
-        self.root = self.root_obj
+            self.root = bpy.context.object
+            self.root.name = 'Root'
+        if CUSTOM_PROP_TILE_SIZE_Z not in self.root:
+            self.root[CUSTOM_PROP_TILE_SIZE_Z] = 1.0
+        self.tilesize_z = self.root[CUSTOM_PROP_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
+        if CUSTOM_PROP_LAST_CURSOR in self.root:
+            self.cursor = Cursor.deserialize(self.root[CUSTOM_PROP_LAST_CURSOR])
+            if self.cursor.tile3d not in bpy.data.groups:
+                self.cursor.tile3d = None
         logging.debug("initialized root obj")
 
     def on_quit(self):
-        self.root_obj[CUSTOM_PROP_LAST_CURSOR] = self.cursor.serialize()
+        self.root[CUSTOM_PROP_LAST_CURSOR] = self.cursor.serialize()
 
     def error(self, msg):
         logging.error(msg)
+
+    def get_layers_array(self):
+        lst = [False] * 20
+        lst[self.layer] = True
+        return lst
 
     def _get_tiles(self):
         finder = Tile3DFinder()
@@ -257,9 +264,9 @@ class Tilemap3D:
 
     def create_tile(self, group):
         if group == 'empty':
-            bpy.ops.object.empty_add()
+            bpy.ops.object.empty_add(layers=self.get_layers_array())
         else:
-            bpy.ops.object.group_instance_add(group=group)
+            bpy.ops.object.group_instance_add(group=group, layers=self.get_layers_array())
         tile3d = bpy.context.object
         tile3d.empty_draw_size = 0.25
         tile3d.pos = self.cursor.pos

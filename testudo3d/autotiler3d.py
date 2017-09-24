@@ -6,7 +6,7 @@ import bpy
 from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS
 from .turtle3d import Turtle3D
 
-CUSTOM_PROP_AUTO = 't3d_auto'
+LAYER_OFFSET = 10 # hmm
 CUSTOM_PROP_TILESET = 't3d_tileset'
 
 def readlines(path):
@@ -81,13 +81,12 @@ class AutoTiler3D(Turtle3D):
         self.tileset_ = None
         self.manual_mode = False
 
-        prop = bpy.context.scene.t3d_prop
-        prop.tileset_idx = prop.tileset_idx # give it a kick
-
     def init(self):
         Turtle3D.init(self)
-        self.init_auto_root()
         self.init_rules()
+
+        prop = bpy.context.scene.t3d_prop
+        prop.tileset_idx = prop.tileset_idx # give it a kick
 
     def init_rules(self):
         prop = bpy.context.scene.t3d_prop
@@ -95,24 +94,6 @@ class AutoTiler3D(Turtle3D):
         for tileset in prop.tilesets:
             path = bpy.path.abspath(tileset.path)
             self.rulesets[tileset.tileset_name] = parse_rules(path)
-
-    def init_auto_root(self):
-        parent = self.root_obj.parent
-        if parent:
-            search = parent.children
-        else:
-            search = [obj for obj in bpy.data.objects if not obj.parent]
-        for obj in search:
-            if CUSTOM_PROP_AUTO in obj and obj[CUSTOM_PROP_AUTO]:
-                self.auto_root = obj
-                return
-        # not found, create
-        bpy.ops.object.empty_add(radius=0.25, location=(0,0,0), rotation=(0,0,0))
-        self.auto_root = bpy.context.object
-        self.auto_root.name = 'Auto'
-        self.auto_root[CUSTOM_PROP_AUTO] = True
-        if parent:
-            self.auto_root.parent = parent
 
     def get_tileset(self):
         return self.tileset_
@@ -123,17 +104,23 @@ class AutoTiler3D(Turtle3D):
 
     def delete(self, ignore=None):
         # hmm this will slow down region operations and stuff... avoidable?
+        self.layer = self.user_layer + LAYER_OFFSET # hmm
         Turtle3D.delete(self, ignore)
+        self.layer = self.user_layer
         self.do_auto_tiling()
 
     def paint(self):
+        self.layer = self.user_layer + LAYER_OFFSET # hmm
         Turtle3D.delete(self)
         tile3d = self.create_tile('empty')
+        self.layer = self.user_layer
         tile3d[CUSTOM_PROP_TILESET] = self.tileset.tileset_name
         self.do_auto_tiling()
 
     def get_occupied(self):
+        self.layer = self.user_layer + LAYER_OFFSET
         finder = Tile3DFinder()
+        self.layer = self.user_layer
         center = finder.get_tiles_at(self.cursor.pos)
         adjacent = [finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
         return center, adjacent
@@ -158,11 +145,9 @@ class AutoTiler3D(Turtle3D):
             ruleset = self.rulesets[tileset]
             rule = ruleset.get(bitmask)
 
-        self.root = self.auto_root
         Turtle3D.delete(self)
 
         if center and rule:
             tile3d = self.create_tile(rule.tile3d)
             tile3d.rot = radians(rule.rot)
             tile3d[CUSTOM_PROP_TILESET] = tileset
-        self.root = self.root_obj
