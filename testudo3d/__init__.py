@@ -141,8 +141,9 @@ def make_linked_duplicate(src):
 
 def create_group_instance(group_name):
     group = bpy.data.groups[group_name]
-    bpy.ops.object.empty_add(name=group_name)
+    bpy.ops.object.empty_add()
     empty = bpy.context.object
+    empty.name = group_name
     empty.dupli_type = 'GROUP'
     empty.dupli_group = group
     return empty
@@ -725,6 +726,7 @@ class Goto3DCursor(Operator):
         return T3DOperatorBase.running_modal
 
     def execute(self, context):
+        # todo this breaks when root not 0,0,0
         pos = context.space_data.cursor_location
         round_vector(pos)
         t3d.goto(pos.x, pos.y) # note: 2D only...

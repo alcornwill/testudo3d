@@ -107,11 +107,10 @@ class AutoTiler3D(Turtle3D):
                 self.auto_root = obj
                 return
         # not found, create
-        bpy.ops.object.empty_add()
+        bpy.ops.object.empty_add(radius=0.25, location=(0,0,0), rotation=(0,0,0))
         self.auto_root = bpy.context.object
         self.auto_root.name = 'Auto'
         self.auto_root[CUSTOM_PROP_AUTO] = True
-        self.auto_root.empty_draw_size = 0.25
         if parent:
             self.auto_root.parent = parent
 
