@@ -94,7 +94,8 @@ class Turtle3D(Tilemap3D):
     def plot(self, x, y):
         self.cursor.pos.x = x
         self.cursor.pos.y = y
-        self.dot()
+        # self.dot()
+        self._cdraw()
 
     def circle(self, radius):
         x0 = self.getx()
@@ -121,6 +122,37 @@ class Turtle3D(Tilemap3D):
                 err -= 2*x + 1
         self.setx(x0)
         self.sety(y0)
+
+    def circfill(self, radius):
+        cx = self.getx()
+        cy = self.gety()
+        x = radius
+        y = 0
+        err = -radius
+        points = []
+
+        while y <= x:
+            lasty = y
+            err += y
+            y += 1
+            err += y
+            self.plot4(cx, cy, x, lasty)
+            if err > 0:
+                if x != lasty:
+                    self.plot4(cx, cy, lasty, x)
+                err -= x
+                x -= 1
+                err -= x
+        self.setx(cx)
+        self.sety(cy)
+
+    def plot4(self, cx, cy, x, y):
+        self.goto(cx - x, cy + y)
+        self.line(cx + x, cy + y)
+        if x != 0 and y != 0:
+            self.goto(cx - x, cy - y)
+            self.line(cx + x, cy - y)
+
 
     def line(self, x2, y2):
         x1, y1 = self.getx(), self.gety()

@@ -35,7 +35,7 @@ import logging
 import bpy
 import bgl
 import blf
-from bpy_extras import view3d_utils
+from bpy_extras.view3d_utils import region_2d_to_vector_3d, region_2d_to_origin_3d
 from math import ceil, sqrt, radians, degrees
 from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.geometry import intersect_line_plane
@@ -66,6 +66,40 @@ class Vec2:
         self.y = y
 
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
+CIRCLE = (
+    Vector((-5.9371814131736755e-08, 0.5000001192092896, 0.0)),
+    Vector((-0.09754522144794464, 0.4903927743434906, 0.0)),
+    Vector((-0.19134178757667542, 0.46193990111351013, 0.0)),
+    Vector((-0.27778518199920654, 0.4157349467277527, 0.0)),
+    Vector((-0.35355344414711, 0.35355353355407715, 0.0)),
+    Vector((-0.4157348871231079, 0.2777852416038513, 0.0)),
+    Vector((-0.46193981170654297, 0.1913418471813202, 0.0)),
+    Vector((-0.49039268493652344, 0.0975453183054924, 0.0)),
+    Vector((-0.5000000596046448, 1.802413009954762e-07, 0.0)),
+    Vector((-0.4903927147388458, -0.09754496067762375, 0.0)),
+    Vector((-0.46193984150886536, -0.19134150445461273, 0.0)),
+    Vector((-0.4157348871231079, -0.27778494358062744, 0.0)),
+    Vector((-0.35355344414711, -0.35355323553085327, 0.0)),
+    Vector((-0.27778515219688416, -0.4157346785068512, 0.0)),
+    Vector((-0.19134169816970825, -0.46193966269493103, 0.0)),
+    Vector((-0.09754510223865509, -0.4903925061225891, 0.0)),
+    Vector((1.0354887081120978e-07, -0.4999998211860657, 0.0)),
+    Vector((0.09754530340433121, -0.49039244651794434, 0.0)),
+    Vector((0.19134187698364258, -0.4619395136833191, 0.0)),
+    Vector((0.2777853012084961, -0.41573449969291687, 0.0)),
+    Vector((0.35355356335639954, -0.35355302691459656, 0.0)),
+    Vector((0.4157349467277527, -0.27778467535972595, 0.0)),
+    Vector((0.46193987131118774, -0.19134120643138885, 0.0)),
+    Vector((0.49039265513420105, -0.0975445881485939, 0.0)),
+    Vector((0.4999999403953552, 6.252919320104411e-07, 0.0)),
+    Vector((0.4903924763202667, 0.0975458174943924, 0.0)),
+    Vector((0.4619394838809967, 0.19134236872196198, 0.0)),
+    Vector((0.4157344102859497, 0.2777857780456543, 0.0)),
+    Vector((0.3535528779029846, 0.35355398058891296, 0.0)),
+    Vector((0.2777844965457916, 0.4157353341579437, 0.0)),
+    Vector((0.19134098291397095, 0.461940199136734, 0.0)),
+    Vector((0.0975443497300148, 0.49039292335510254, 0.0)),
+)
 UP = Vector((0, 0, 1))
 # ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
@@ -91,7 +125,7 @@ def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
     bgl.glVertex3f(*end)
 
-def draw_wire(edges, color=WHITE):
+def draw_edges(edges, color=WHITE):
     bgl.glBegin(bgl.GL_LINES)
     bgl.glColor4f(*color)
     for start, end in edges:
@@ -103,6 +137,14 @@ def draw_poly(poly, color):
     bgl.glColor4f(*color)
     for i in range(len(poly) - 1):
         draw_line_3d(poly[i], poly[i + 1])
+    bgl.glEnd()
+
+def draw_wire(poly, color):
+    bgl.glBegin(bgl.GL_LINES)
+    bgl.glColor4f(*color)
+    for i in range(len(poly) - 1):
+        draw_line_3d(poly[i], poly[i + 1])
+    draw_line_3d(poly[-1], poly[0]) # close
     bgl.glEnd()
 
 def mat_transform(mat, poly):
@@ -234,21 +276,28 @@ class T3DProperties(PropertyGroup):
         description="Path to your tile3d library .blend file",
         subtype="FILE_PATH"
     )
-    circle_radius = IntProperty(
-        name="Circle Radius",
-        description='Radius of circle',
-        default=5
+    brush_size = IntProperty(
+        name="Brush Size",
+        description='Radius of brush',
+        min=1,
+        max=8,
+        default=1
+    )
+    outline = BoolProperty(
+        name='Outline',
+        description='Use outline brush',
+        default=False
     )
     tilesets = CollectionProperty(
         name='Tilesets',
         description='Tilesets (for auto-tiling)',
         type=TilesetPropertyGroup
     )
-    idx = 0
+    tileset_idx_ = 0
     def getidx(self):
-        return T3DProperties.idx
+        return T3DProperties.tileset_idx_
     def setidx(self, value):
-        T3DProperties.idx = value
+        T3DProperties.tileset_idx_ = value
         if T3DOperatorBase.running_modal:
             t3d.tileset = self.tilesets[self.tileset_idx]
     tileset_idx = IntProperty(
@@ -261,11 +310,11 @@ class T3DProperties(PropertyGroup):
         description='Name of tileset to be generated',
         default='Tileset'
     )
-    ul = 0
+    user_layer_ = 0
     def get_user_layer(self):
-        return T3DProperties.ul
+        return T3DProperties.user_layer_
     def set_user_layer(self, value):
-        T3DProperties.ul = value
+        T3DProperties.user_layer_ = value
         bpy.context.scene.layers[value] = True
         if T3DOperatorBase.running_modal:
             t3d.layer = value
@@ -285,6 +334,19 @@ class T3DProperties(PropertyGroup):
     rename_to = StringProperty(
         name='To',
         description='Rename To'
+    )
+    def get_down(self):
+        if T3DOperatorBase.running_modal:
+            return t3d.state.paint
+        return False
+    def set_down(self, value):
+        if T3DOperatorBase.running_modal:
+            t3d.state.paint = value
+    down = BoolProperty(
+        name='Down',
+        default=False,
+        get=get_down,
+        set=set_down
     )
 
 class TilesetActionsOperator(bpy.types.Operator):
@@ -365,14 +427,11 @@ class T3DDrawingPanel(Panel):
 
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
-        row = layout.row(align=True)
-        row.operator(T3DDown.bl_idname)
-        row.operator(T3DUp.bl_idname)
+        layout.prop(prop, 'down')
         layout.operator(CursorToSelected.bl_idname)
         layout.operator(Goto3DCursor.bl_idname)
-        row = layout.row(align=True)
-        row.operator(T3DCircle.bl_idname)
-        row.prop(prop, 'circle_radius')
+        layout.prop(prop, 'outline')
+        layout.prop(prop, 'brush_size')
 
     def display_selected_tile3d(self, context):
         obj = context.object
@@ -417,6 +476,8 @@ class T3DOperatorBase:
         self._handle_2d = None
         self.active_scene = None
         self.select_cube = None
+        self.mousepaint = False
+        self.lastpos = None
         self.input_map = [
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
@@ -439,9 +500,13 @@ class T3DOperatorBase:
             KeyInput('C', 'PRESS', self.handle_copy, ctrl=True),
             KeyInput('V', 'PRESS', self.handle_paste, ctrl=True),
             KeyInput('B', 'PRESS', self.handle_select),
-            KeyInput('Z', 'PRESS', self.undo, ctrl=True),
-            KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True),
-            KeyInput('P', 'PRESS', self.handle_raycast)
+            KeyInput('Z', 'PRESS', self.handle_undo, ctrl=True),
+            KeyInput('Z', 'PRESS', self.handle_redo, ctrl=True, shift=True),
+            KeyInput('LEFTMOUSE', 'PRESS', self.handle_mousepaint),
+            KeyInput('LEFTMOUSE', 'RELEASE', self.handle_mousepaint_end),
+            KeyInput('TAB', 'PRESS', self.handle_toggle_mousepaint),
+            KeyInput('RIGHT_BRACKET', 'PRESS', self.handle_inc_brush_size),
+            KeyInput('LEFT_BRACKET', 'PRESS', self.handle_dec_brush_size),
         ]
 
     def __del__(self):
@@ -472,9 +537,8 @@ class T3DOperatorBase:
             self.on_quit()
             return {'FINISHED'}
         except Exception as e:
-            self.error("Unexpected error: {}".format(e))
             self.on_quit()
-            return {'CANCELLED'}
+            raise e
 
     def invoke(self, context, event):
         if T3DOperatorBase.running_modal: return {'CANCELLED'}
@@ -499,13 +563,14 @@ class T3DOperatorBase:
         context.window_manager.modal_handler_add(self)
 
     def handle_input(self, event):
+        self.handle_raycast(event)
         for keyinput in self.input_map:
             if (keyinput.shift and not event.shift or
                 keyinput.ctrl and not event.ctrl):
                 continue
             if keyinput.type == event.type and keyinput.value == event.value:
-                keyinput.func()
-                return {'RUNNING_MODAL'}
+                result = keyinput.func()
+                return result or {'RUNNING_MODAL'}
         return {'PASS_THROUGH'}
 
     def handle_quit(self):
@@ -527,6 +592,17 @@ class T3DOperatorBase:
             self.state.paint = False
         elif not self.state.paint:
             self.state.paint = True
+            self.brush_draw()
+
+    def brush_draw(self):
+        prop = bpy.context.scene.t3d_prop
+        if prop.brush_size > 1:
+            radius = prop.brush_size - 1
+            if prop.outline:
+                self.circle(radius)
+            else:
+                self.circfill(radius)
+        else:
             self._cdraw()
 
     def handle_paint_end(self):
@@ -540,7 +616,7 @@ class T3DOperatorBase:
             self.state.delete = False
         elif not self.state.grab and not self.state.delete:
             self.state.delete = True
-            self._cdraw()
+            self.brush_draw()
 
     def handle_delete_end(self):
         self.state.delete = False
@@ -565,6 +641,12 @@ class T3DOperatorBase:
         self.paste()
         bpy.ops.ed.undo_push()
 
+    def handle_undo(self):
+        self.undo()
+
+    def handle_redo(self):
+        self.redo()
+
     def handle_select(self):
         if self.state.grab:
             return
@@ -575,16 +657,42 @@ class T3DOperatorBase:
             self.end_select()
 
     def handle_raycast(self, event):
-        # todo pass event to input handlers!
+        if not self.mousepaint: return
+
         coord = event.mouse_region_x, event.mouse_region_y
+        view_vector = region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
+        ray_origin = region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
 
-        # get the ray from the viewport and mouse
-        view_vector = view3d_utils.region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
-        ray_origin = view3d_utils.region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
-
-        pos = round_vector(bpy.context.scene.cursor_location)
+        pos = bpy.context.scene.cursor_location
+        round_vector(pos)
         plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, UP)
-        self.cursor.pos = plane_pos # is this right?
+        round_vector(plane_pos)
+        if plane_pos != self.lastpos:
+            self.cursor.pos = plane_pos
+            self.lastpos = plane_pos
+            self.brush_draw()
+            self.construct_select_cube()
+
+    def handle_toggle_mousepaint(self):
+        if self.mousepaint:
+            self.handle_mousepaint_end()
+        self.mousepaint = not self.mousepaint
+
+    def handle_mousepaint(self):
+        if not self.mousepaint: return {'PASS_THROUGH'}
+        self.handle_paint()
+
+    def handle_mousepaint_end(self):
+        if not self.mousepaint: return {'PASS_THROUGH'}
+        self.handle_paint_end()
+
+    def handle_inc_brush_size(self):
+        prop = bpy.context.scene.t3d_prop
+        prop.brush_size += 1
+
+    def handle_dec_brush_size(self):
+        prop = bpy.context.scene.t3d_prop
+        prop.brush_size -= 1
 
     def construct_select_cube(self):
         logging.debug('construct select cube')
@@ -604,9 +712,10 @@ class T3DOperatorBase:
 
         bgl.glDisable(bgl.GL_DEPTH_TEST)
 
-        color = YELLOW if self.state.select else WHITE
+        color = (YELLOW if self.state.select else
+                 CYAN if self.mousepaint else WHITE)
         t_cube = mat_transform_edges(mat, self.select_cube)
-        draw_wire(t_cube, color)
+        draw_edges(t_cube, color)
 
         mat_rot = Matrix.Rotation(radians(self.cursor.rot), 4, 'Z')
         mat_trans = Matrix.Translation(self.cursor.pos)
@@ -616,6 +725,17 @@ class T3DOperatorBase:
         t_arrow = mat_transform(mat, ARROW)
         color = PURPLE if not self.state.grab else GREEN
         draw_poly(t_arrow, color)
+
+        brush_size = context.scene.t3d_prop.brush_size
+        if brush_size > 1:
+            brush_size = brush_size * 2 - 1
+            mat_trans = Matrix.Translation(self.cursor.pos)
+            mat_sx = Matrix.Scale(brush_size, 4, Vector((1.0, 0.0, 0.0)))
+            mat_sy = Matrix.Scale(brush_size, 4, Vector((0.0, 1.0, 0.0)))
+            mat = mat_trans *  mat_sx * mat_sy
+            mat = mat_world * mat
+            t_circle = mat_transform(mat, CIRCLE)
+            draw_wire(t_circle, RED)
 
         restore_gl_defaults()
 
@@ -833,8 +953,21 @@ class T3DCircle(Operator):
         return T3DOperatorBase.running_modal
 
     def execute(self, context):
-        radius = context.scene.t3d_prop.circle_radius
+        radius = context.scene.t3d_prop.brush_size
         t3d.circle(radius=radius)
+        return {'FINISHED'}
+
+class T3DCircleFill(Operator):
+    bl_idname = "view_3d.t3d_circle_fill"
+    bl_label = "Circle Fill"
+
+    @classmethod
+    def poll(cls, context):
+        return T3DOperatorBase.running_modal
+
+    def execute(self, context):
+        radius = context.scene.t3d_prop.brush_size
+        t3d.circfill(radius=radius)
         return {'FINISHED'}
 
 class AlignTiles(Operator):

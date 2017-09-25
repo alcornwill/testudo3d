@@ -47,7 +47,7 @@ class CircleTest(T3DTest):
 
     def execute(self):
         t3d.cursor.tile3d = 'Suzanne'
-        t3d.circle(8)
+        t3d.circfill(8)
 
 class CombinedTest(T3DTest):
     name = "combined_test"
