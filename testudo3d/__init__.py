@@ -35,8 +35,10 @@ import logging
 import bpy
 import bgl
 import blf
+from bpy_extras import view3d_utils
 from math import ceil, sqrt, radians, degrees
 from mathutils import Vector, Quaternion, Euler, Matrix
+from mathutils.geometry import intersect_line_plane
 from bpy.props import (
     StringProperty,
     BoolProperty,
@@ -56,7 +58,7 @@ from bpy.types import (
 
 from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
 from .turtle3d import Turtle3D
-from .autotiler3d import AutoTiler3D
+from .autotiler3d import AutoTiler3D, CUSTOM_PROP_TILESET
 
 class Vec2:
     def __init__(self, x, y):
@@ -64,6 +66,7 @@ class Vec2:
         self.y = y
 
 ARROW = (Vector((-0.4, -0.4, 0)), Vector((0.4, -0.4, 0)), Vector((0, 0.6, 0)))
+UP = Vector((0, 0, 1))
 # ARROW = (Vector((-0.4, 0.1, 0)), Vector((0.4, 0.1, 0)), Vector((0, 0.45, 0)))
 RED = (1.0, 0.0, 0.0, 1.0)
 GREEN = (0.0, 1.0, 0.0, 1.0)
@@ -241,7 +244,7 @@ class T3DProperties(PropertyGroup):
         description='Tilesets (for auto-tiling)',
         type=TilesetPropertyGroup
     )
-    idx = -1
+    idx = 0
     def getidx(self):
         return T3DProperties.idx
     def setidx(self, value):
@@ -256,13 +259,14 @@ class T3DProperties(PropertyGroup):
     roomgen_name = StringProperty(
         name='Name',
         description='Name of tileset to be generated',
-        default='tileset'
+        default='Tileset'
     )
     ul = 0
     def get_user_layer(self):
         return T3DProperties.ul
     def set_user_layer(self, value):
         T3DProperties.ul = value
+        bpy.context.scene.layers[value] = True
         if T3DOperatorBase.running_modal:
             t3d.layer = value
     user_layer = IntProperty(
@@ -274,6 +278,14 @@ class T3DProperties(PropertyGroup):
         get=get_user_layer,
         set=set_user_layer
     )
+    rename_from = StringProperty(
+        name='From',
+        description='Rename From'
+    )
+    rename_to = StringProperty(
+        name='To',
+        description='Rename To'
+    )
 
 class TilesetActionsOperator(bpy.types.Operator):
     bl_idname = "view3d.t3d_tileset_actions"
@@ -283,8 +295,8 @@ class TilesetActionsOperator(bpy.types.Operator):
         items=(
             ('UP', "Up", ""),
             ('DOWN', "Down", ""),
-            ('REMOVE', "Remove", ""),
-            ('ADD', "Add", ""),
+            ('REMOVE', "Remove", "Remove Rules"),
+            ('ADD', "Add", "Add Rules"),
         )
     )
 
@@ -294,7 +306,6 @@ class TilesetActionsOperator(bpy.types.Operator):
 
         try:
             item = prop.tilesets[idx]
-            print("happened")
         except IndexError:
             pass
         else:
@@ -309,7 +320,7 @@ class TilesetActionsOperator(bpy.types.Operator):
                 prop.tilesets.remove(idx)
         if self.action == 'ADD':
             item = prop.tilesets.add()
-            prop.tileset_idx += 1
+            prop.tileset_idx = len(prop.tilesets) - 1
 
         return {"FINISHED"}
 
@@ -333,7 +344,7 @@ class T3DToolsPanel(Panel):
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
 
         col = row.column(align=True)
-        col.enabled = not T3DOperatorBase.running_modal or not t3d.manual_mode
+        col.enabled = not T3DOperatorBase.running_modal or t3d.manual_mode
         col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMIN', text="").action = 'ADD'
         col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMOUT', text="").action = 'REMOVE'
         col.separator()
@@ -389,16 +400,17 @@ class T3DUtilsPanel(Panel):
         col = layout.column(align=True)
         col.operator(RoomGenOperator.bl_idname)
         col.prop(prop, 'roomgen_name', text='')
+        col = layout.column(align=True)
+        col.operator(RenameTilesetOperator.bl_idname)
+        row = col.row(align=True)
+        row.prop(prop, 'rename_from', text='')
+        row.prop(prop, 'rename_to', text='')
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         layout.operator(ConnectObjects.bl_idname)
 
 class T3DOperatorBase:
     running_modal = False
-
-    last_pos = None # todo store on Empty custom properties
-    last_rot = None
-    last_tile3d = None
 
     def __init__(self):
         self._handle_3d = None
@@ -428,7 +440,8 @@ class T3DOperatorBase:
             KeyInput('V', 'PRESS', self.handle_paste, ctrl=True),
             KeyInput('B', 'PRESS', self.handle_select),
             KeyInput('Z', 'PRESS', self.undo, ctrl=True),
-            KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True)
+            KeyInput('Z', 'PRESS', self.redo, ctrl=True, shift=True),
+            KeyInput('P', 'PRESS', self.handle_raycast)
         ]
 
     def __del__(self):
@@ -458,9 +471,8 @@ class T3DOperatorBase:
         except QuitError:
             self.on_quit()
             return {'FINISHED'}
-        except:
-            exc_type, exc_msg, exc_tb = sys.exc_info()
-            self.error("Unexpected error line {}: {}".format(exc_tb.tb_lineno, exc_msg))
+        except Exception as e:
+            self.error("Unexpected error: {}".format(e))
             self.on_quit()
             return {'CANCELLED'}
 
@@ -562,6 +574,18 @@ class T3DOperatorBase:
             # cancel
             self.end_select()
 
+    def handle_raycast(self, event):
+        # todo pass event to input handlers!
+        coord = event.mouse_region_x, event.mouse_region_y
+
+        # get the ray from the viewport and mouse
+        view_vector = view3d_utils.region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
+        ray_origin = view3d_utils.region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
+
+        pos = round_vector(bpy.context.scene.cursor_location)
+        plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, UP)
+        self.cursor.pos = plane_pos # is this right?
+
     def construct_select_cube(self):
         logging.debug('construct select cube')
         if self.state.select:
@@ -648,6 +672,31 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     def __init__(self):
         AutoTiler3D.__init__(self)
         T3DOperatorBase.__init__(self)
+
+    def init(self):
+        AutoTiler3D.init(self)
+        self.validate_tilesets()
+        self.validate_rules()
+
+    def validate_tilesets(self):
+        notfound = []
+        for obj in bpy.data.objects:
+            if CUSTOM_PROP_TILESET in obj:
+                tileset = obj[CUSTOM_PROP_TILESET]
+                if tileset not in self.rulesets and tileset not in notfound:
+                    notfound.append(tileset)
+        for tileset in notfound:
+            self.report({'WARNING'}, 'Tileset "{}" present in scene but rules not found! (did you rename rules.txt file? use RenameTileset)'.format(tileset))
+
+    def validate_rules(self):
+        tiles = [group.name for group in bpy.data.groups]
+        for name, value in self.rulesets.items():
+            notfound = []
+            for rule in value.rules.values():
+                if rule.tile3d not in tiles and rule.tile3d not in notfound:
+                    notfound.append(rule.tile3d)
+            for tile3d in notfound:
+                self.report({'WARNING'}, 'Tile "{}" not found in blend (did you link your tiles?)'.format(tile3d))
 
     def on_quit(self):
         AutoTiler3D.on_quit(self)
@@ -810,9 +859,9 @@ class AlignTiles(Operator):
         return {'FINISHED'}
 
 class T3DSetupTilesOperator(Operator):
-    """Setup 3D Tiles for tile library"""
     bl_idname = 'view3d.t3d_setup_tiles'
     bl_label = 'Setup 3D Tiles'
+    bl_description = 'Setup objects in scene as tiles (WARNING will delete all groups)'
 
     def __init__(self):
         bpy.types.Operator.__init__(self)
@@ -875,7 +924,7 @@ class T3DSetupTilesOperator(Operator):
 class RoomGenOperator(Operator):
     bl_idname = 'view3d.t3d_room_gen'
     bl_label = 'Room Gen'
-    bl_description = 'Generate tileset from "Wall", "Floor" and "Ceiling"'
+    bl_description = 'Generate tileset from "Wall", "Floor" and "Ceiling" groups'
 
     masks = (
         0b0000,
@@ -888,10 +937,25 @@ class RoomGenOperator(Operator):
 
     def execute(self, context):
         name = context.scene.t3d_prop.roomgen_name
-        self.make_tileset(name, 'Wall', 'Ceiling', 'Floor') # make wall, floor, ceiling configurable?
+        self.make_tileset(name, 'Wall', 'Ceiling', 'Floor')
         return {'FINISHED'}
 
     def make_tileset(self, name, wall, ceiling, floor):
+        if (wall not in bpy.data.groups or
+            ceiling not in bpy.data.groups or
+            floor not in bpy.data.groups):
+            self.report({'WARNING'}, 'group "Wall", "Floor" or "Ceiling" not found, no tiles generated')
+            return
+        fp = bpy.data.filepath
+        if not fp:
+            self.report({'ERROR'}, 'Blend not saved, cannot save rules file')
+            return
+
+        scene = bpy.data.scenes.new(name=name)
+        bpy.context.screen.scene = scene
+
+        name = name.lower()
+
         index = 0
         lines = []
         for j in range(4):
@@ -918,7 +982,7 @@ class RoomGenOperator(Operator):
                 if not objs: continue
                 bpy.ops.object.empty_add()
                 empty = bpy.context.object
-                empty.name = name + format(index, '03d')
+                empty.name = name + format(index, '02d')
                 for obj in objs:
                     obj.parent = empty
 
@@ -928,7 +992,7 @@ class RoomGenOperator(Operator):
 
                 index += 1
 
-        blenddir = dirname(bpy.data.filepath)
+        blenddir = dirname(fp)
         writelines(join(blenddir, name + '.txt'), lines)
 
 class MakeTilesRealOperator(Operator):
@@ -955,6 +1019,29 @@ class MakeTilesRealOperator(Operator):
                 new.location = new.location + pos
                 new.rotation_euler.rotate(rot)
             bpy.data.objects.remove(tile, do_unlink=True)
+        return {'FINISHED'}
+
+class RenameTilesetOperator(Operator):
+    bl_idname = 'view3d.t3d_rename_tileset'
+    bl_label = 'Rename Tileset'
+    bl_description = 'If you renamed a rules file, fix your scene with this'
+
+    @classmethod
+    def poll(cls, context):
+        return not T3DOperatorBase.running_modal
+
+    def execute(self, context):
+        prop = bpy.context.scene.t3d_prop
+        from_ = prop.rename_from
+        to = prop.rename_to
+        changed = []
+        for obj in bpy.data.objects:
+            if CUSTOM_PROP_TILESET in obj:
+                tileset = obj[CUSTOM_PROP_TILESET]
+                if tileset == from_:
+                    obj[CUSTOM_PROP_TILESET] = to
+                    changed.append(obj)
+        self.report({'INFO'}, '{} objects changed'.format(len(changed)))
         return {'FINISHED'}
 
 def register():

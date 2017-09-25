@@ -32,8 +32,6 @@ class Rule:
         self.tile3d = tile3d
         self.rot = rot
 
-        # todo 'warning rule contains tile not presend in blend "{}"'
-
     def __str__(self):
         return '{} {}'.format(self.tile3d, self.rot)
 
@@ -47,7 +45,7 @@ def parse_rules(path):
     rules = {}
     default = None
     lines = readlines(path)
-    for line in lines:
+    for line_no, line in enumerate(lines):
         if line.startswith('#'): continue # ignore
         split = line.split(' ')
         split = [s for s in split if s]
@@ -72,6 +70,10 @@ def parse_rules(path):
         except ValueError as e:
             if a == 'default':
                 default = Rule(b or None)
+            else:
+                e.line_no = line_no+1
+                e.line = line
+                raise e
 
     return Ruleset(rules, default)
 
@@ -93,7 +95,12 @@ class AutoTiler3D(Turtle3D):
         self.rulesets = {}
         for tileset in prop.tilesets:
             path = bpy.path.abspath(tileset.path)
-            self.rulesets[tileset.tileset_name] = parse_rules(path)
+            try:
+                self.rulesets[tileset.tileset_name] = parse_rules(path)
+            except FileNotFoundError as e:
+                self.error('Rules file "{}" not found'.format(e.filename))
+            except ValueError as e:
+                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.path, e.line_no, e.line))
 
     def get_tileset(self):
         return self.tileset_
@@ -102,15 +109,19 @@ class AutoTiler3D(Turtle3D):
         self.cursor.tile3d = tileset.tileset_name
     tileset = property(get_tileset, set_tileset)
 
+    def get_data_layer(self):
+        return self.user_layer + LAYER_OFFSET
+    data_layer = property(get_data_layer)
+
     def delete(self, ignore=None):
         # hmm this will slow down region operations and stuff... avoidable?
-        self.layer = self.user_layer + LAYER_OFFSET # hmm
+        self.layer = self.data_layer
         Turtle3D.delete(self, ignore)
         self.layer = self.user_layer
         self.do_auto_tiling()
 
     def paint(self):
-        self.layer = self.user_layer + LAYER_OFFSET # hmm
+        self.layer = self.data_layer
         Turtle3D.delete(self)
         tile3d = self.create_tile('empty')
         self.layer = self.user_layer
@@ -118,7 +129,7 @@ class AutoTiler3D(Turtle3D):
         self.do_auto_tiling()
 
     def get_occupied(self):
-        self.layer = self.user_layer + LAYER_OFFSET
+        self.layer = self.data_layer
         finder = Tile3DFinder()
         self.layer = self.user_layer
         center = finder.get_tiles_at(self.cursor.pos)

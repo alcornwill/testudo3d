@@ -1,11 +1,3 @@
-
-# T3D rules file
-# lines starting with '#' will be ignored
-
-# for i in range(64):
-#     print(format(i, '06b'))
-
-DUWSEN
 default junction_white
 000000 pipe_H
 000001 pipe_H
