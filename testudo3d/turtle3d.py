@@ -124,12 +124,12 @@ class Turtle3D(Tilemap3D):
         self.sety(y0)
 
     def circfill(self, radius):
+        # todo this sometimes is rubbish...
         cx = self.getx()
         cy = self.gety()
         x = radius
         y = 0
         err = -radius
-        points = []
 
         while y <= x:
             lasty = y

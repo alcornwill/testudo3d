@@ -914,10 +914,11 @@ class Goto3DCursor(Operator):
         return T3DOperatorBase.running_modal
 
     def execute(self, context):
-        # todo this breaks when root not 0,0,0
-        pos = context.space_data.cursor_location
+        # note: doesn't make sense when root rotated in x or y
+        mat_world = t3d.root.matrix_world
+        pos = (context.space_data.cursor_location - t3d.root.location) * mat_world
         round_vector(pos)
-        t3d.goto(pos.x, pos.y) # note: 2D only...
+        t3d.goto(pos.x, pos.y)
         return {'FINISHED'}
 
 class T3DDown(Operator):
