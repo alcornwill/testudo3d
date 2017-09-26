@@ -427,9 +427,9 @@ class T3DDrawingPanel(Panel):
 
         self.display_selected_tile3d(context)
         layout.operator(SetActiveTile3D.bl_idname)
-        layout.prop(prop, 'down')
         layout.operator(CursorToSelected.bl_idname)
         layout.operator(Goto3DCursor.bl_idname)
+        layout.prop(prop, 'down')
         layout.prop(prop, 'outline')
         layout.prop(prop, 'brush_size')
 
@@ -663,9 +663,17 @@ class T3DOperatorBase:
         view_vector = region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
         ray_origin = region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
 
-        pos = bpy.context.scene.cursor_location
-        round_vector(pos)
-        plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, UP)
+        # it is slightly unclear how cursor affects raycast, but it makes sense
+        z = bpy.context.scene.cursor_location.z
+        offset = Vector((0, 0, z))
+        offset = offset * self.root.matrix_world
+        pos = self.root.location + offset
+        rot = self.root.matrix_world.to_quaternion()
+        nml = rot * UP
+        plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, nml)
+        if not plane_pos: return # workaround for quad view?
+        mat = self.root.matrix_world.inverted()
+        plane_pos = mat * plane_pos
         round_vector(plane_pos)
         if plane_pos != self.lastpos:
             self.cursor.pos = plane_pos
@@ -916,59 +924,10 @@ class Goto3DCursor(Operator):
     def execute(self, context):
         # note: doesn't make sense when root rotated in x or y
         mat_world = t3d.root.matrix_world
+        # todo is it mat * vec?
         pos = (context.space_data.cursor_location - t3d.root.location) * mat_world
         round_vector(pos)
         t3d.goto(pos.x, pos.y)
-        return {'FINISHED'}
-
-class T3DDown(Operator):
-    bl_idname = "view_3d.t3d_down"
-    bl_label = "Down"
-
-    @classmethod
-    def poll(cls, context):
-        return T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        t3d.down()
-        return {'FINISHED'}
-
-class T3DUp(Operator):
-    bl_idname = "view_3d.t3d_up"
-    bl_label = "Up"
-
-    @classmethod
-    def poll(cls, context):
-        return T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        t3d.up()
-        return {'FINISHED'}
-
-class T3DCircle(Operator):
-    bl_idname = "view_3d.t3d_circle"
-    bl_label = "Circle"
-
-    @classmethod
-    def poll(cls, context):
-        return T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        radius = context.scene.t3d_prop.brush_size
-        t3d.circle(radius=radius)
-        return {'FINISHED'}
-
-class T3DCircleFill(Operator):
-    bl_idname = "view_3d.t3d_circle_fill"
-    bl_label = "Circle Fill"
-
-    @classmethod
-    def poll(cls, context):
-        return T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        radius = context.scene.t3d_prop.brush_size
-        t3d.circfill(radius=radius)
         return {'FINISHED'}
 
 class AlignTiles(Operator):
