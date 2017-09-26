@@ -435,8 +435,8 @@ class T3DDrawingPanel(Panel):
 
     def display_selected_tile3d(self, context):
         obj = context.object
-        if obj:
-            self.layout.label("selected: {}".format(obj.group))
+        text = obj.group if obj else 'None'
+        self.layout.label("selected: {}".format(text))
 
 class T3DUtilsPanel(Panel):
     bl_idname = "view3d.t3d_utils_panel"
@@ -477,7 +477,6 @@ class T3DOperatorBase:
         self.active_scene = None
         self.select_cube = None
         self.mousepaint = False
-        self.lastpos = None
         self.input_map = [
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
@@ -594,17 +593,6 @@ class T3DOperatorBase:
             self.state.paint = True
             self.brush_draw()
 
-    def brush_draw(self):
-        prop = bpy.context.scene.t3d_prop
-        if prop.brush_size > 1:
-            radius = prop.brush_size - 1
-            if prop.outline:
-                self.circle(radius)
-            else:
-                self.circfill(radius)
-        else:
-            self._cdraw()
-
     def handle_paint_end(self):
         self.state.paint = False
         bpy.ops.ed.undo_push()
@@ -663,12 +651,11 @@ class T3DOperatorBase:
         view_vector = region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
         ray_origin = region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
 
-        # it is slightly unclear how cursor affects raycast, but it makes sense
-        z = bpy.context.scene.cursor_location.z
-        offset = Vector((0, 0, z))
-        offset = offset * self.root.matrix_world
-        pos = self.root.location + offset
         rot = self.root.matrix_world.to_quaternion()
+        z = self.cursor.pos.z # z persists
+        offset = Vector((0, 0, z))
+        offset = rot * offset
+        pos = self.root.location + offset
         nml = rot * UP
         plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, nml)
         if not plane_pos: return # workaround for quad view?
@@ -676,10 +663,8 @@ class T3DOperatorBase:
         plane_pos = mat * plane_pos
         round_vector(plane_pos)
         if plane_pos != self.lastpos:
-            self.cursor.pos = plane_pos
-            self.lastpos = plane_pos
-            self.brush_draw()
-            self.construct_select_cube()
+            d = plane_pos - self.lastpos
+            self.on_move(d)
 
     def handle_toggle_mousepaint(self):
         if self.mousepaint:
@@ -735,7 +720,7 @@ class T3DOperatorBase:
         draw_poly(t_arrow, color)
 
         brush_size = context.scene.t3d_prop.brush_size
-        if brush_size > 1:
+        if not self.state.grab and not self.state.select and brush_size > 1:
             brush_size = brush_size * 2 - 1
             mat_trans = Matrix.Translation(self.cursor.pos)
             mat_sx = Matrix.Scale(brush_size, 4, Vector((1.0, 0.0, 0.0)))

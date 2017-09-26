@@ -205,10 +205,12 @@ class Tilemap3D:
         self.clipboard = None
         # self.finder = FinderManager()
         self.manual_mode = True # hacky
+        self.prop = bpy.context.scene.t3d_prop
+        self.lastpos = None
 
         # init
-        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
 
@@ -234,6 +236,7 @@ class Tilemap3D:
             self.cursor = Cursor.deserialize(self.root[CUSTOM_PROP_LAST_CURSOR])
             if self.cursor.tile3d not in bpy.data.groups:
                 self.cursor.tile3d = None
+        self.lastpos = self.cursor.pos
         logging.debug("initialized root obj")
 
     def on_quit(self):
@@ -293,6 +296,16 @@ class Tilemap3D:
         elif self.state.delete:
             self.delete()
 
+    def brush_draw(self):
+        if self.prop.brush_size > 1:
+            radius = self.prop.brush_size - 1
+            if self.prop.outline:
+                self.circle(radius)
+            else:
+                self.circfill(radius)
+        else:
+            self._cdraw()
+
     def rotate(self, rot):
         # rotate the cursor and paint
         logging.debug("rotated cursor {}".format(rot))
@@ -317,13 +330,17 @@ class Tilemap3D:
         logging.debug("moved cursor {}".format(vec))
         forward = self.cursor.forward
         vec = forward * vec
+        self.on_move(vec)
+
+    def on_move(self, vec):
         self.cursor.pos = self.cursor.pos + vec
         if self.state.grab:
             for item in self.grabbed:
                 item.tile3d.pos = item.tile3d.pos + vec
             if self.state.select:
                 self.select_start_pos = self.select_start_pos + vec
-        self._cdraw()
+        self.lastpos = self.cursor.pos
+        self.brush_draw()
         self.construct_select_cube()
 
     def smart_move(self, x, y, repeat=1):
