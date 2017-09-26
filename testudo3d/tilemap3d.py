@@ -3,11 +3,11 @@ import builtins
 import bpy
 import logging
 import random
-from math import floor, degrees, radians, atan2, sqrt
+from math import floor, degrees, radians, atan2, sqrt, isclose
 from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.kdtree import KDTree
 
-SEARCH_RANGE = 0.01
+TOLERANCE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
 ADJACENCY_VECTORS = (
@@ -165,16 +165,23 @@ class Tile3DFinder:
         self.kd.balance()
 
     def get_tiles_at(self, pos):
-        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, SEARCH_RANGE)]
+        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, TOLERANCE)]
+
+def vector_equal(a, b):
+    return isclose(a.x, b.x, abs_tol=TOLERANCE) and isclose(a.y, b.y, abs_tol=TOLERANCE) and isclose(a.z, b.z, abs_tol=TOLERANCE)
+
+class Tile3DFinderSimple:
+    # test
+    def __init__(self):
+        pass
+
+    def get_tiles_at(self, pos):
+        return [obj for obj in t3d.root.children if obj.layers[t3d.layer] and vector_equal(obj.location, pos)]
 
 class FinderManager:
-    # todo
-    # my thinking is that
-    # a lot of the time you don't need to reconstruct the KDTree
-    # even though you should, because you're looking at different cells
     def __init__(self):
         self.finder = None # also need one for each root
-        self.invalidated = False
+        self.invalidated = True
 
     def get_tiles_at(self, pos):
         if self.invalidated:
@@ -203,14 +210,15 @@ class Tilemap3D:
         self.select_start_pos = None
         self.grabbed = None
         self.clipboard = None
-        # self.finder = FinderManager()
+        self.finder = FinderManager()
         self.manual_mode = True # hacky
         self.prop = bpy.context.scene.t3d_prop
         self.lastpos = None
+        self.select_cube_redraw = False
 
         # init
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
 
@@ -251,8 +259,7 @@ class Tilemap3D:
         return lst
 
     def _get_tiles(self):
-        finder = Tile3DFinder()
-        return finder.get_tiles_at(self.cursor.pos)
+        return self.finder.get_tiles_at(self.cursor.pos)
 
     def get_tile3d(self):
         tiles = self._get_tiles()
@@ -287,7 +294,13 @@ class Tilemap3D:
             self.delete_tile(tile3d)
 
     def delete_tile(self, obj):
-        bpy.data.objects.remove(obj, True)
+        try:
+            bpy.data.objects.remove(obj, True)
+        except ReferenceError as e:
+            # todo
+            # might be because finder should have been invalidated
+            # might be because drawing routines are dodgey and go over same cell twice
+            logging.warning('Object deleted twice')
         logging.debug("deleted 1 object")
 
     def _cdraw(self):
@@ -320,7 +333,7 @@ class Tilemap3D:
                 vec = self.select_start_pos - self.cursor.pos
                 self.select_start_pos = mat_rot * vec
                 self.select_start_pos = self.select_start_pos + self.cursor.pos
-                self.construct_select_cube()
+                self.select_cube_redraw = True
         self.cursor.rot = self.cursor.rot + rot
         self._cdraw()
 
@@ -341,7 +354,7 @@ class Tilemap3D:
                 self.select_start_pos = self.select_start_pos + vec
         self.lastpos = self.cursor.pos
         self.brush_draw()
-        self.construct_select_cube()
+        self.select_cube_redraw = True
 
     def smart_move(self, x, y, repeat=1):
         # move in x or y, but only if already facing that direction
@@ -428,7 +441,7 @@ class Tilemap3D:
         logging.debug("end box select")
         self.do_region(self._cdraw)
         self.state.select = False
-        self.construct_select_cube()
+        self.select_cube_redraw = True
 
     def get_selected_tiles(self):
         # get tiles within selection bounds
@@ -451,6 +464,11 @@ class Tilemap3D:
                     func(*args, **kw)
         self.cursor.pos = orig_pos
 
+    def redraw_select_cube(self):
+        if self.select_cube_redraw:
+            self.construct_select_cube()
+            self.select_cube_redraw = False
+
     def construct_select_cube(self):
         pass
 
@@ -460,3 +478,115 @@ class Tilemap3D:
         cube_min = Vector((min(start.x, end.x), min(start.y, end.y), min(start.z, end.z)))
         cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
         return cube_min, cube_max
+
+    def _goto(self, x, y):
+        self.cursor.pos.x = x
+        self.cursor.pos.y = y
+        self.select_cube_redraw = True
+
+    def plot(self, x, y):
+        self._goto(x,y)
+        self._cdraw()
+
+    def circle(self, radius):
+        x0, y0, z = self.cursor.pos
+        x = radius
+        y = 0
+        err = 0
+
+        while x >= y:
+            self.plot(x0 + x, y0 + y)
+            self.plot(x0 + y, y0 + x)
+            self.plot(x0 - y, y0 + x)
+            self.plot(x0 - x, y0 + y)
+            self.plot(x0 - x, y0 - y)
+            self.plot(x0 - y, y0 - x)
+            self.plot(x0 + y, y0 - x)
+            self.plot(x0 + x, y0 - y)
+
+            y += 1
+            if err <= 0:
+                err += 2*y + 1
+            if err > 0:
+                x -= 1
+                err -= 2*x + 1
+        self._goto(x0,y0)
+
+    def circfill(self, radius):
+        # todo this sometimes is rubbish...
+        cx, cy, z = self.cursor.pos
+        x = radius
+        y = 0
+        err = -radius
+
+        while y <= x:
+            lasty = y
+            err += y
+            y += 1
+            err += y
+            self.plot4(cx, cy, x, lasty)
+            if err > 0:
+                if x != lasty:
+                    self.plot4(cx, cy, lasty, x)
+                err -= x
+                x -= 1
+                err -= x
+        self._goto(cx, cy)
+
+    def plot4(self, cx, cy, x, y):
+        self._goto(cx - x, cy + y)
+        self.line(cx + x, cy + y)
+        if x != 0 and y != 0:
+            self._goto(cx - x, cy - y)
+            self.line(cx + x, cy - y)
+
+    def line(self, x2, y2):
+        x1, y1, z = self.cursor.pos
+        x1 = int(x1)
+        y1 = int(y1)
+        x2 = int(x2)
+        y2 = int(y2)
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        if dx == 0:
+            step = 1 if dy > 0 else -1
+            for y in range(y1, y2+step, step):
+                self.plot(x1, y)
+        elif dy == 0:
+            step = 1 if dx > 0 else -1
+            for x in range(x1, x2+step, step):
+                self.plot(x, y1)
+        else:
+            if dy < 0:
+                dy = -dy
+                stepy = -1
+            else:
+                stepy = 1
+
+            if dx < 0:
+                dx = -dx
+                stepx = -1
+            else:
+                stepx = 1
+
+            if dx > dy:
+                frac = dy - (dx >> 1)
+                while x1 != x2:
+                    if frac >= 0:
+                        y1 = y1 + stepy
+                        frac = frac - dx
+                    x1 = x1 + stepx
+                    frac = frac + dy
+                    self.plot(x1, y1)
+            else:
+                frac = dx - (dy >> 1)
+                while y1 != y2:
+                    if frac >= 0:
+                        x1 = x1 + stepx
+                        frac = frac - dy
+                    y1 = y1 + stepy
+                    frac = frac + dx
+                    self.plot(x1, y1)
+        self._goto(x2,y2)

@@ -466,7 +466,7 @@ class T3DUtilsPanel(Panel):
         row.prop(prop, 'rename_to', text='')
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
-        layout.operator(ConnectObjects.bl_idname)
+        layout.operator(ConnectRoots.bl_idname)
 
 class T3DOperatorBase:
     running_modal = False
@@ -530,7 +530,12 @@ class T3DOperatorBase:
         context.area.tag_redraw()
         try:
             if mouseover_region(context.area, event):
-                return self.handle_input(event)
+                self.handle_raycast(event)
+                result = self.handle_input(event)
+                self.redraw_select_cube() # hmm, do this here?
+                self.finder.invalidate() # todo this totally doesn't work when use python API
+                                         # or maybe we don't need anymore
+                return result
             return {'PASS_THROUGH'}
         except QuitError:
             self.on_quit()
@@ -562,7 +567,6 @@ class T3DOperatorBase:
         context.window_manager.modal_handler_add(self)
 
     def handle_input(self, event):
-        self.handle_raycast(event)
         for keyinput in self.input_map:
             if (keyinput.shift and not event.shift or
                 keyinput.ctrl and not event.ctrl):
@@ -578,7 +582,7 @@ class T3DOperatorBase:
         elif self.state.select:
             # cancel
             self.state.select = False
-            self.construct_select_cube()
+            self.select_cube_redraw = True
         else:
             raise QuitError()
 
@@ -688,7 +692,6 @@ class T3DOperatorBase:
         prop.brush_size -= 1
 
     def construct_select_cube(self):
-        logging.debug('construct select cube')
         if self.state.select:
             cube_min, cube_max = self.select_cube_bounds()
         else:
@@ -822,10 +825,10 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     def construct_select_cube(self):
         T3DOperatorBase.construct_select_cube(self)
 
-class ConnectObjects(Operator):
-    """Connect two objects with constraints utility"""
-    bl_idname = "view3d.connect_objects"
-    bl_label = "Connect Objects"
+class ConnectRoots(Operator):
+    bl_idname = "view3d.connect_roots"
+    bl_label = "Connect Roots"
+    bl_description = "Connect two roots with constraints utility"
 
     @classmethod
     def poll(self, context):
@@ -836,12 +839,8 @@ class ConnectObjects(Operator):
         obj1 = context.scene.objects.active
         selected.remove(obj1)
         obj2 = selected[0]
-        copy_location = obj1.constraints.new('COPY_LOCATION')
-        copy_rotation = obj1.constraints.new('COPY_ROTATION')
-        copy_location.target = obj2
-        copy_rotation.target = obj2
-        copy_location.use_offset = True
-        copy_rotation.use_offset = True
+        childof = obj2.constraints.new('CHILD_OF')
+        childof.target = obj1
         return {'FINISHED'}
 
 class LinkTile3DLibrary(Operator):
@@ -900,7 +899,8 @@ class CursorToSelected(Operator):
 
 class Goto3DCursor(Operator):
     bl_idname = "view_3d.t3d_goto_3dcursor"
-    bl_label = "Goto 3D Cursor"
+    bl_label = "Line"
+    bl_description = 'Draw a line to the 3D cursor'
 
     @classmethod
     def poll(cls, context):
@@ -912,7 +912,7 @@ class Goto3DCursor(Operator):
         # todo is it mat * vec?
         pos = (context.space_data.cursor_location - t3d.root.location) * mat_world
         round_vector(pos)
-        t3d.goto(pos.x, pos.y)
+        t3d.line(pos.x, pos.y)
         return {'FINISHED'}
 
 class AlignTiles(Operator):

@@ -129,11 +129,12 @@ class AutoTiler3D(Turtle3D):
         self.do_auto_tiling()
 
     def get_occupied(self):
-        self.layer = self.data_layer
-        finder = Tile3DFinder()
+        self.finder.invalidate() # using different layer
+        self.layer = self.data_layer # todo if layer is property automatically invalidate
+        center = self.finder.get_tiles_at(self.cursor.pos)
+        adjacent = [self.finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
         self.layer = self.user_layer
-        center = finder.get_tiles_at(self.cursor.pos)
-        adjacent = [finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
+        self.finder.invalidate()
         return center, adjacent
 
     def do_auto_tiling(self):
