@@ -321,7 +321,7 @@ class T3DProperties(PropertyGroup):
     user_layer = IntProperty(
         name='Layer',
         min=0,
-        max=9,
+        max=19,
         description='Layer to work in',
         default=0,
         get=get_user_layer,
