@@ -467,6 +467,7 @@ class T3DUtilsPanel(Panel):
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         layout.operator(ConnectRoots.bl_idname)
+        layout.operator(XmlExportOperator.bl_idname)
 
 class T3DOperatorBase:
     running_modal = False
@@ -655,11 +656,11 @@ class T3DOperatorBase:
         view_vector = region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
         ray_origin = region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
 
-        rot = self.root.matrix_world.to_quaternion()
+        pos, rot, scl = self.root.matrix_world.decompose()
         z = self.cursor.pos.z # z persists
         offset = Vector((0, 0, z))
         offset = rot * offset
-        pos = self.root.location + offset
+        pos = pos + offset
         nml = rot * UP
         plane_pos = intersect_line_plane(ray_origin, ray_origin + view_vector, pos, nml)
         if not plane_pos: return # workaround for quad view?
@@ -841,6 +842,10 @@ class ConnectRoots(Operator):
         obj2 = selected[0]
         childof = obj2.constraints.new('CHILD_OF')
         childof.target = obj1
+        childof.inverse_matrix = obj1.matrix_world.inverted()
+        obj2.update_tag({'OBJECT'})
+        context.scene.update()
+        self.report({'INFO'}, 'roots connected')
         return {'FINISHED'}
 
 class LinkTile3DLibrary(Operator):
@@ -1120,6 +1125,43 @@ class RenameTilesetOperator(Operator):
                     obj[CUSTOM_PROP_TILESET] = to
                     changed.append(obj)
         self.report({'INFO'}, '{} objects changed'.format(len(changed)))
+        return {'FINISHED'}
+
+class XmlExportOperator(Operator):
+    # test
+    bl_idname = 'view3d.t3d_xml_export'
+    bl_label = 'Xml Export'
+    bl_description = 'Export scene to custom T3D Xml format'
+
+    def execute(self, context):
+        import xml.etree.cElementTree as et
+        fp = bpy.data.filepath
+        if not fp:
+            self.report({'ERROR'}, 'Blend not saved, cannot save xml file')
+            return {'FINISHED'}
+        blenddir = dirname(fp)
+        path = join(blenddir, 'tiles.xml')
+
+        # todo
+        root = et.Element('Scene')
+
+        tilesets = et.SubElement(root, 'Tilesets')
+        tileset1 = et.SubElement(tilesets, 'Tileset1', name='tileset1')
+        tile1 = et.SubElement(tileset1, 'Tile', name='tile1')
+        tile2 = et.SubElement(tileset1, 'Tile', name='tile2')
+        tile3 = et.SubElement(tileset1, 'Tile', name='tile3')
+        tileset2 = et.SubElement(tilesets, 'Tileset2', name='tileset2')
+
+        root1 = et.SubElement(root, 'Root', name='Root.001', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1")
+        tile1 = et.SubElement(root1, 'Tile', name='tile1.001', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1", tile='tile1', tileset='tileset1', layer="0")
+        tile2 = et.SubElement(root1, 'Tile', name='tile1.002', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1", tile='tile1', tileset='tileset1', layer="1")
+        tile3 = et.SubElement(root1, 'Tile', name='tile2.001', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1", tile='tile2', tileset='tileset1', layer="0")
+        root2 = et.SubElement(root1, 'Root', name='Root.002', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1")
+        root3 = et.SubElement(root, 'Root', name='Root.003', matrix="1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1")
+
+        tree = et.ElementTree(root)
+        tree.write(path)
+
         return {'FINISHED'}
 
 def register():

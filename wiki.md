@@ -1,22 +1,29 @@
 # Intro
 Testudo3D (T3D) is a 3D tilemap addon for blender  
 Modular level design is a ubiquitous technique in the game industry  
-3D tilemaps are a trade-off of a more blocky aesthetic for a lot more productivity  
-But this tool has a lot of uses beyond game development (e.g. generating pipes)
+3D tilemaps are a higher level of modularity, useful to artists who want to produce more content, faster.  
+Most of all tilemapping is fun to use, and removes the tedium of placing modules by hand.  
+But this tool could have some interesting uses beyond game development.  
   
 T3D is easy to use, and requires a minimal amount of configuration.  
-Once you have your tiles and rules set up, you can start working in seconds.    
+Setting up the rules is admittidly a bit intimidating, but once it's done you benefit from the power of auto-tiling.  
 By only using features already within blender,
-scenes created with T3D are always compatible with conventionally modelled scenes. 
-  
-Using Blender as a level editor is a radical choice,
-but a lot of consideration has gone into the design of this addon,
-it is fully intended to be used for a serious indie game project  
-__However__ you will have to figure out the 'export' part yourself, as this is specific to the game and game engine.  
-As long as you can do a bit of python (who can't?) that shouldn't be a problem
+scenes created with T3D are always compatible with conventionally modelled scenes.   
+T3D is designed to let you sketch out the structure of your scene before you add the details by hand
 
-# Bugs
-If you find something that you think is a bug, or find a feature that T3D is sorely missing, please contact alcornwill@gmail.com
+Using Blender as a level editor is a radical choice, but there are compelling reasons to try it:
+* jump back and forth between modeling and level design
+* use the program you are already comfortable with
+* game engine independent (no platform lock-in!)
+* blender is free and open source (all addons are open source too)
+* blender is easy to script and extend with addons, you can tailor it to your needs
+
+__Note__ you will have to figure out the __export__ part yourself.  
+If you can't figure out how to import a scene made with blender into your game engine, 
+this tool will not be much use to you as a level editor.
+
+# Contact
+If you find a bug or something to be improved, please contact __alcornwill@gmail.com__
 
 # Turtle Graphics?
 [wikipedia](https://en.wikipedia.org/wiki/Turtle_graphics)  
@@ -63,10 +70,10 @@ __Tip__: use __Align Tiles__ to align objects to grid (3DView > T3D > Utils > Al
 Notice that when you run Manual/Auto Mode, an empty called 'Root' will pop up in your scene  
 The root can have any transformation, it does not have to stay at 0,0,0  
 This helps you create levels that feel more organic, as you can break right-angles by rotating the root  
+
 __Tip__ if you have multiple roots in a 'chain', you can use constraints to connect them  
-This is what the __Connect Objects__ utility does (3DView > T3D > Utils > Connect Objects)  
-Select a tile (such as a doorway), __then__ select the root you want to connect it to  
-Then clear the transform of the root (Alt+G, Alt+R) and the roots will be connected
+This is what the __Connect Roots__ utility does (3DView > T3D > Utils > Connect Roots)  
+First select the 'child' root, __then__ select the 'parent' root.  
   
 **NOTE** when you enter manual/auto mode, the currently selected object will be used as the root  
 __Strange things may happen__ if you select a tile and then enter manual/auto mode, be careful to always select the root    
@@ -119,7 +126,7 @@ Down Up West South East North
 e.g. in the bitmask '000001' only North is occupied  
 __NOTE__:  tiles will be rotated in Z if applicable
 
-**Limitations**: note that the bitmask doesn't contain information for **diagonals** or **tilesets**  
+**Limitations**: note that the bitmask doesn't contain information for **diagonals** or **terrain**  
 The 6-bit design was chosen in favor of simplicity, but it could be extended  
 
 # Manual Mode
@@ -167,6 +174,7 @@ __Make Tiles Real__ will only make the first level of group instances real
 # Controls
 Key | Action
 ----|----
+__TAB__ | toggle mouse paint
 __CURSOR KEYS__ | move
 __CTRL UP/DOWN__ | move up and down
 __CTRL LEFT/RIGHT__ | strafe left/right
@@ -177,6 +185,8 @@ __CTRL C/V__ | copy/paste
 __G__ | grab
 __B__ | select region
 __S__ | sample
+__[__ | increment brush size
+__]__ | decrement brush size
 __ESCAPE__ | escape/cancel
 
 **NOTE:** controls are not configurable yet (sorry)
