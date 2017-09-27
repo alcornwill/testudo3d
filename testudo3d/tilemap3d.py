@@ -203,7 +203,7 @@ class PaintModeState:
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root = None
-        self.layer = None # active layer
+        self._layer = None # active layer
         self.tilesize_z = 1.0
         self.cursor = Cursor()
         self.state = PaintModeState()
@@ -225,6 +225,13 @@ class Tilemap3D:
     def get_layer(self):
         return bpy.context.scene.t3d_prop.user_layer
     user_layer = property(get_layer)
+
+    def get_layer(self):
+        return self._layer
+    def set_layer(self, value):
+        self._layer = value
+        self.finder.invalidate()
+    layer = property(get_layer, set_layer)
 
     def init(self):
         self.init_root_obj()
@@ -252,6 +259,9 @@ class Tilemap3D:
 
     def error(self, msg):
         logging.error(msg)
+
+    def on_update(self):
+        self.finder.invalidate()
 
     def get_layers_array(self):
         lst = [False] * 20

@@ -82,6 +82,7 @@ class AutoTiler3D(Turtle3D):
         Turtle3D.__init__(self, *args, **kw)
         self.tileset_ = None
         self.manual_mode = False
+        self.changed = []
 
     def init(self):
         Turtle3D.init(self)
@@ -118,7 +119,8 @@ class AutoTiler3D(Turtle3D):
         self.layer = self.data_layer
         Turtle3D.delete(self, ignore)
         self.layer = self.user_layer
-        self.do_auto_tiling()
+        # self.do_auto_tiling()
+        self.tile_changed()
 
     def paint(self):
         self.layer = self.data_layer
@@ -126,24 +128,37 @@ class AutoTiler3D(Turtle3D):
         tile3d = self.create_tile('empty')
         self.layer = self.user_layer
         tile3d[CUSTOM_PROP_TILESET] = self.tileset.tileset_name
+        # self.do_auto_tiling()
+        self.tile_changed()
+
+    def on_update(self):
+        Turtle3D.on_update(self)
         self.do_auto_tiling()
+        self.changed = []
+
+    def tile_changed(self):
+        # todo also call when do grab stuff
+        self.changed.append(self.cursor.pos)
 
     def get_occupied(self):
-        self.finder.invalidate() # using different layer
-        self.layer = self.data_layer # todo if layer is property automatically invalidate
+        self.layer = self.data_layer
         center = self.finder.get_tiles_at(self.cursor.pos)
         adjacent = [self.finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
         self.layer = self.user_layer
-        self.finder.invalidate()
         return center, adjacent
 
     def do_auto_tiling(self):
-        self.auto_tiling(self.tileset.tileset_name)
-        # repaint adjacent
+        # todo test if changing same pos twice (would be bad)
         orig_pos = self.cursor.pos
-        for vec in ADJACENCY_VECTORS:
-            cursor = Cursor(None, orig_pos + vec, 0)
-            self.do_with_cursor(cursor, self.auto_tiling)
+        for pos in self.changed:
+            self.cursor.pos = pos
+            self.auto_tiling(self.tileset.tileset_name)
+            # repaint adjacent
+            orig_pos = self.cursor.pos
+            for vec in ADJACENCY_VECTORS:
+                cursor = Cursor(None, orig_pos + vec, 0)
+                self.do_with_cursor(cursor, self.auto_tiling)
+        self.cursor.pos = orig_pos
 
     def auto_tiling(self, tileset=None):
         # check adjacent cells if occupied

@@ -533,9 +533,8 @@ class T3DOperatorBase:
             if mouseover_region(context.area, event):
                 self.handle_raycast(event)
                 result = self.handle_input(event)
-                self.redraw_select_cube() # hmm, do this here?
-                self.finder.invalidate() # todo this totally doesn't work when use python API
-                                         # or maybe we don't need anymore
+                self.redraw_select_cube()
+                self.on_update()
                 return result
             return {'PASS_THROUGH'}
         except QuitError:
