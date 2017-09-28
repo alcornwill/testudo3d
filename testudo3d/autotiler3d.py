@@ -96,11 +96,17 @@ class AutoTiler3D(Turtle3D):
     def init_rules(self):
         self.rulesets = {}
         for scene in self.tilesets.values():
+            if not scene.rules:
+                self.error('Tileset "{}" has no ruleset'.format(scene.name))
+                self.on_quit()
+                return
             text = bpy.data.texts[scene.rules]
             try:
                 self.rulesets[scene.name] = parse_rules(text) # note: monkey patching
             except ValueError as e:
                 self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.path, e.line_no, e.line))
+                self.on_quit()
+                return
 
     def delete(self, ignore=None):
         Turtle3D.delete(self, ignore)
@@ -151,8 +157,9 @@ class AutoTiler3D(Turtle3D):
         # check adjacent cells if occupied
         center, adjacent = self.get_occupied()
         if not center: return # nothing to repaint
-        bitmask = self.get_bitmask(adjacent)
+        if CUSTOM_PROP_TILESET not in center[0]: return # just a normal object
 
+        bitmask = self.get_bitmask(adjacent)
         tileset = center[0][CUSTOM_PROP_TILESET]
         ruleset = self.rulesets[tileset]
         rule = ruleset.get(bitmask)

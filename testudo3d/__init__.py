@@ -116,11 +116,6 @@ addon_keymaps = []
 
 text_cursor = Vec2(0, 0)  # used for UI
 
-
-def writelines(path, lines):
-    with open(path, 'w') as f:
-        f.writelines(lines)
-
 def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
     bgl.glVertex3f(*end)
@@ -254,6 +249,7 @@ class KeyInput:
 class TilesetList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
+        if item.tileset not in bpy.data.scenes: return # sometimes happens if not refreshed
         tileset = bpy.data.scenes[item.tileset]
         row.label(tileset.name)
         # rules = item.tileset.rules
@@ -266,6 +262,10 @@ class TilesetPropertyGroup(PropertyGroup):
     tileset = StringProperty(
         name='Tileset',
     )
+
+def enum_previews(self, context):
+    prop = bpy.context.scene.t3d_prop
+    return prop.enum_items
 
 class T3DProperties(PropertyGroup):
     tile3d_library_path = StringProperty(
@@ -285,8 +285,22 @@ class T3DProperties(PropertyGroup):
         description='Use outline brush',
         default=False
     )
-    @staticmethod
-    def refresh_tilesets():
+    # tile_previews_ = IntProperty() # i want to just use cursor.tile3d, but then can't draw tile previews when not running_modal...
+    # def get_tile_preview(self):
+    #     return T3DProperties.tile_previews_
+    # def set_tile_preview(self, value):
+    #     T3DProperties.tile_previews_ = value
+    #     if T3DOperatorBase.running_modal:
+    #         t3d.cursor.tile3d = T3DProperties.tile_previews[value]
+    #         # todo this can still totally desync, terrible
+    tile_previews = EnumProperty(
+        name='Tile',
+        items=enum_previews,
+        # get=get_tile_preview,
+        # set=set_tile_preview
+    )
+    enum_items = []
+    def refresh_tilesets(self):
         # todo also store list of all tiles in tileset?
         prop = bpy.context.scene.t3d_prop
         prop.tilesets.clear()
@@ -294,15 +308,32 @@ class T3DProperties(PropertyGroup):
             if scene.is_tileset:
                 item = prop.tilesets.add()
                 item.tileset = scene.name
+        self.refresh_enum_items()
         if T3DOperatorBase.running_modal:
             t3d.refresh_tilesets() # annoying
+
             if not t3d.manual_mode:
                 t3d.init_rules() # hmm
+
+    def refresh_enum_items(self):
+        T3DProperties.enum_items = []
+        tileset = self.get_tileset()
+        if not tileset: return
+        ts = bpy.data.scenes[tileset.tileset]
+        groupnames = [group.name for group in bpy.data.groups]
+        tiles = [obj for obj in ts.objects if not obj.parent and obj.name in groupnames] # todo cache this (only way know tiles in tileset)
+        for i, obj in enumerate(tiles):
+            icon = obj.preview.icon_id if obj.preview.is_image_custom else ""
+            T3DProperties.enum_items.append((obj.name, obj.name, "", icon, i))
+
     tilesets = CollectionProperty(
         name='Tilesets',
         description='Tilesets (for auto-tiling)',
         type=TilesetPropertyGroup
     )
+    def get_tileset(self):
+        if self.tilesets:
+            return self.tilesets[self.tileset_idx_]
     tileset_idx_ = 0
     def getidx(self):
         return T3DProperties.tileset_idx_
@@ -387,7 +418,7 @@ class TilesetActionsOperator(bpy.types.Operator):
                 item_prev = prop.tilesets[idx-1].name
                 prop.tileset_idx -= 1
         if self.action == 'REFRESH':
-            T3DProperties.refresh_tilesets()
+            prop.refresh_tilesets()
 
         return {"FINISHED"}
 
@@ -422,6 +453,9 @@ class T3DToolsPanel(Panel):
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
         layout.prop(prop, 'user_layer')
+
+        layout.template_icon_view(prop, 'tile_previews') # todo don't draw if no previews? or just disable
+        layout.prop(prop, 'tile_previews') # todo don't really want both
 
         row = layout.row()
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
@@ -536,8 +570,11 @@ class T3DOperatorBase:
     def on_quit(self):
         if not T3DOperatorBase.running_modal: return
         T3DOperatorBase.running_modal = False
-        bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
-        bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle_3d, 'WINDOW')
+            bpy.types.SpaceView3D.draw_handler_remove(self._handle_2d, 'WINDOW')
+        except ValueError:
+            pass # not set yet
         deselect_all()
         bpy.context.scene.objects.active = self.root
 
@@ -549,6 +586,9 @@ class T3DOperatorBase:
         self.on_quit()
 
     def modal(self, context, event):
+        if not self.running_modal:
+            self.on_quit()
+            return {'FINISHED'}
         context.area.tag_redraw()
         try:
             if mouseover_region(context.area, event):
@@ -786,6 +826,15 @@ class ManualModeOperator(Turtle3D, T3DOperatorBase, Operator):
     def __init__(self):
         Turtle3D.__init__(self)
         T3DOperatorBase.__init__(self)
+
+    @classmethod
+    def poll(cls, context):
+        prop = context.scene.t3d_prop
+        try:
+            tileset = prop.tilesets[prop.tileset_idx]
+        except IndexError:
+            return False
+        return T3DOperatorBase.poll(context)
 
     def on_quit(self):
         Turtle3D.on_quit(self)
@@ -1061,10 +1110,6 @@ class RoomGenOperator(Operator):
             floor not in bpy.data.groups):
             self.report({'WARNING'}, 'group "Wall", "Floor" or "Ceiling" not found, no tiles generated')
             return
-        fp = bpy.data.filepath
-        if not fp:
-            self.report({'ERROR'}, 'Blend not saved, cannot save rules file')
-            return
 
         scene = bpy.data.scenes.new(name=name)
         bpy.context.screen.scene = scene
@@ -1107,8 +1152,18 @@ class RoomGenOperator(Operator):
 
                 index += 1
 
-        blenddir = dirname(fp)
-        writelines(join(blenddir, name + '.txt'), lines)
+        text_name = name+'.txt'
+        if text_name in bpy.data.texts:
+            # reuse
+            text = bpy.data.texts[text_name]
+            text.clear()
+        else:
+            text = bpy.data.texts.new(name=text_name)
+        for line in lines:
+            text.write(line)
+
+        bpy.ops.view3d.t3d_setup_tiles()
+        scene.rules = text_name
 
 class MakeTilesRealOperator(Operator):
     bl_idname = 'view3d.t3d_make_tiles_real'
@@ -1120,10 +1175,8 @@ class MakeTilesRealOperator(Operator):
         return not T3DOperatorBase.running_modal
 
     def execute(self, context):
-        # todo operate on all tiles (custom property t3d_tile)
-        # for now, operates on selected (maybe better anyway)
-        selected = bpy.context.selected_objects
-        for tile in selected:
+        tiles = [obj for obj in context.scene.objects if CUSTOM_PROP_TILESET in obj]
+        for tile in tiles:
             pos = tile.location.copy()
             rot = tile.rotation_euler.copy()
             group = tile.dupli_group
@@ -1206,7 +1259,7 @@ def register():
         return self.is_tileset_
     def set_is_tileset(self, value):
         self.is_tileset_ = value
-        T3DProperties.refresh_tilesets()
+        bpy.types.Scene.t3d_prop.refresh_tilesets()
         update_3dviews()
     bpy.types.Scene.is_tileset = BoolProperty(name='Is Tileset',
                                               get=get_is_tileset,
