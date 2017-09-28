@@ -3,10 +3,10 @@ import logging
 from math import radians
 from random import choice
 import bpy
-from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS
+from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS, CUSTOM_PROP_TILESET
 from .turtle3d import Turtle3D
 
-CUSTOM_PROP_TILESET = 't3d_tileset'
+CUSTOM_PROP_RULES_FILE = 't3d_rules_file'
 
 def readlines(path):
     with open(path) as f:
@@ -34,7 +34,7 @@ class Rule:
     def __str__(self):
         return '{} {}'.format(self.tile3d, self.rot)
 
-def parse_rules(path):
+def parse_rules(text):
     ROTATE = {
         1: [2, 4, 8],
         3: [6, 12, 9],
@@ -43,7 +43,7 @@ def parse_rules(path):
     }
     rules = {}
     default = None
-    lines = readlines(path)
+    lines = [line.body for line in text.lines]
     for line_no, line in enumerate(lines):
         if line.startswith('#'): continue # ignore
         split = line.split(' ')
@@ -93,27 +93,14 @@ class AutoTiler3D(Turtle3D):
         Turtle3D.init(self)
         self.init_rules()
 
-        prop = bpy.context.scene.t3d_prop
-        prop.tileset_idx = prop.tileset_idx # give it a kick
-
     def init_rules(self):
-        prop = bpy.context.scene.t3d_prop
         self.rulesets = {}
-        for tileset in prop.tilesets:
-            path = bpy.path.abspath(tileset.path)
+        for scene in self.tilesets.values():
+            text = bpy.data.texts[scene.rules]
             try:
-                self.rulesets[tileset.tileset_name] = parse_rules(path)
-            except FileNotFoundError as e:
-                self.error('Rules file "{}" not found'.format(e.filename))
+                self.rulesets[scene.name] = parse_rules(text) # note: monkey patching
             except ValueError as e:
                 self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.path, e.line_no, e.line))
-
-    def get_tileset(self):
-        return self.tileset_
-    def set_tileset(self, tileset):
-        self.tileset_ = tileset
-        self.cursor.tile3d = tileset.tileset_name
-    tileset = property(get_tileset, set_tileset)
 
     def delete(self, ignore=None):
         Turtle3D.delete(self, ignore)
@@ -122,7 +109,7 @@ class AutoTiler3D(Turtle3D):
 
     def paint(self):
         Turtle3D.delete(self)
-        self.new_auto_tile(self.tileset.tileset_name)
+        self.new_auto_tile(self.tileset.tileset)
         self.finder.invalidate()
         self.repaint_adjacent()
 

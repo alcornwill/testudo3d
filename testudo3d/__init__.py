@@ -254,21 +254,18 @@ class KeyInput:
 class TilesetList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
-        row.label(item.tileset_name)
-        row.prop(item, 'path', text="")
+        tileset = bpy.data.scenes[item.tileset]
+        row.label(tileset.name)
+        # rules = item.tileset.rules
+        # row.label("{} | {}".format(item.tileset, rules if rules else "None"))
+        sub = row.row()
+        sub.scale_x = 2.0
+        sub.prop_search(tileset, 'rules', bpy.data, 'texts', text='')
 
 class TilesetPropertyGroup(PropertyGroup):
-    # todo allow use text data-block
-    path = StringProperty(
-        name="Rules Path",
-        description="Path to your rules.txt file (for auto-tiling)",
-        subtype="FILE_PATH",
-        default='//tileset1.txt'
+    tileset = StringProperty(
+        name='Tileset',
     )
-    def get_tileset_name(self):
-        name, ext = splitext(basename(self.path))
-        return name
-    tileset_name = property(get_tileset_name)
 
 class T3DProperties(PropertyGroup):
     tile3d_library_path = StringProperty(
@@ -288,6 +285,19 @@ class T3DProperties(PropertyGroup):
         description='Use outline brush',
         default=False
     )
+    @staticmethod
+    def refresh_tilesets():
+        # todo also store list of all tiles in tileset?
+        prop = bpy.context.scene.t3d_prop
+        prop.tilesets.clear()
+        for scene in bpy.data.scenes:
+            if scene.is_tileset:
+                item = prop.tilesets.add()
+                item.tileset = scene.name
+        if T3DOperatorBase.running_modal:
+            t3d.refresh_tilesets() # annoying
+            if not t3d.manual_mode:
+                t3d.init_rules() # hmm
     tilesets = CollectionProperty(
         name='Tilesets',
         description='Tilesets (for auto-tiling)',
@@ -357,8 +367,7 @@ class TilesetActionsOperator(bpy.types.Operator):
         items=(
             ('UP', "Up", ""),
             ('DOWN', "Down", ""),
-            ('REMOVE', "Remove", "Remove Rules"),
-            ('ADD', "Add", "Add Rules"),
+            ('REFRESH', "Refresh", "Refresh Tilesets"),
         )
     )
 
@@ -377,14 +386,26 @@ class TilesetActionsOperator(bpy.types.Operator):
             elif self.action == 'UP' and idx >= 1:
                 item_prev = prop.tilesets[idx-1].name
                 prop.tileset_idx -= 1
-            elif self.action == 'REMOVE':
-                prop.tileset_idx -= 1
-                prop.tilesets.remove(idx)
-        if self.action == 'ADD':
-            item = prop.tilesets.add()
-            prop.tileset_idx = len(prop.tilesets) - 1
+        if self.action == 'REFRESH':
+            T3DProperties.refresh_tilesets()
 
         return {"FINISHED"}
+
+
+class T3DScenePanel(Panel):
+    bl_idname = "SCENE_PT_t3d"
+    bl_label = "T3D"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "scene"
+
+    def draw(self, context):
+        layout = self.layout
+        prop = context.scene.t3d_prop
+        scene = context.scene
+
+        layout.prop(scene, 'is_tileset')
+        layout.prop_search(scene, 'rules', bpy.data, 'texts')
 
 class T3DToolsPanel(Panel):
     bl_idname = "view3d.t3d_tools_panel"
@@ -407,8 +428,7 @@ class T3DToolsPanel(Panel):
 
         col = row.column(align=True)
         col.enabled = not T3DOperatorBase.running_modal or t3d.manual_mode
-        col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMIN', text="").action = 'ADD'
-        col.operator(TilesetActionsOperator.bl_idname, icon='ZOOMOUT', text="").action = 'REMOVE'
+        col.operator(TilesetActionsOperator.bl_idname, icon='FILE_REFRESH', text="").action = 'REFRESH'
         col.separator()
         col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_UP', text="").action = 'UP'
         col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_DOWN', text="").action = 'DOWN'
@@ -478,6 +498,7 @@ class T3DOperatorBase:
         self.active_scene = None
         self.select_cube = None
         self.mousepaint = False
+        self.lastcoord = None
         self.input_map = [
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
@@ -615,10 +636,9 @@ class T3DOperatorBase:
         bpy.ops.ed.undo_push()
 
     def handle_grab(self):
-        if not self.manual_mode:
-            # todo
-            self.report({'WARNING'}, 'Grab not implemented for Auto Mode')
-            return
+        # if not self.manual_mode:
+            # self.report({'WARNING'}, 'Grab not implemented for Auto Mode')
+            # return
         if not self.state.grab:
             self.start_grab()
         else:
@@ -652,6 +672,8 @@ class T3DOperatorBase:
         if not self.mousepaint: return
 
         coord = event.mouse_region_x, event.mouse_region_y
+        if coord == self.lastcoord: return
+        self.lastcoord = coord
         view_vector = region_2d_to_vector_3d(bpy.context.region, bpy.context.region_data, coord)
         ray_origin = region_2d_to_origin_3d(bpy.context.region, bpy.context.region_data, coord)
 
@@ -742,8 +764,13 @@ class T3DOperatorBase:
         text_cursor.y = 140
 
         tile3d = self.cursor.tile3d
-        text = tile3d if tile3d else 'No Active Tile'
-        draw_text_2d(text, size=20, color=WHITE)
+        if self.manual_mode: # hacky
+            text = tile3d if tile3d else 'No Active Tile'
+            color = WHITE if tile3d else RED
+        else:
+            text = self.get_tileset_from_group(tile3d)
+            color = YELLOW
+        draw_text_2d(text, size=20, color=color)
 
         # info
         vec3_str = "{}, {}, {}".format(int(self.cursor.pos.x), int(self.cursor.pos.y), int(self.cursor.pos.z))
@@ -860,6 +887,8 @@ class LinkTile3DLibrary(Operator):
             self.report({'INFO'}, 'linked {} groups'.format(len(data_src.groups)))
             # link scenes
             data_dst.scenes = data_src.scenes
+            # link texts
+            data_dst.texts = data_src.texts
         return {'FINISHED'}
 
 class SetActiveTile3D(Operator):
@@ -954,7 +983,7 @@ class T3DSetupTilesOperator(Operator):
         return context.mode == "OBJECT"
 
     def execute(self, context):
-        self.setup_tiles()
+        self.setup_tiles(context)
         return {'FINISHED'}
 
     def remove_all_groups(self):
@@ -991,17 +1020,21 @@ class T3DSetupTilesOperator(Operator):
                 count = 0
 
     def rename_objects(self):
-        # if contains whitespace replace with underscore
         for obj in self.objects:
+            # if contains whitespace replace with underscore
             if ' ' in obj.name:
                 obj.name = obj.name.replace(' ', '_')
+            # hmm all tile names across tilesets must be unique?
+            # if not obj.name.startswith(tileset):
+            #     obj.name = tileset + '_' + obj.name
 
-    def setup_tiles(self):
+    def setup_tiles(self, context):
         self.objects = [obj for obj in bpy.context.scene.objects if not obj.parent and not obj.hide]
         self.rename_objects()
         self.layout_in_grid()
         self.remove_all_groups()
         self.create_groups()
+        context.scene.is_tileset = True
 
 class RoomGenOperator(Operator):
     bl_idname = 'view3d.t3d_room_gen'
@@ -1167,6 +1200,19 @@ def register():
     bpy.utils.register_module(__name__)
     bpy.types.Scene.t3d_prop = PointerProperty(type=T3DProperties)
     init_object_props()
+
+    bpy.types.Scene.is_tileset_ = BoolProperty()
+    def get_is_tileset(self):
+        return self.is_tileset_
+    def set_is_tileset(self, value):
+        self.is_tileset_ = value
+        T3DProperties.refresh_tilesets()
+        update_3dviews()
+    bpy.types.Scene.is_tileset = BoolProperty(name='Is Tileset',
+                                              get=get_is_tileset,
+                                              set=set_is_tileset)
+    bpy.types.Scene.rules = StringProperty(name='Rules')
+
 
     # keymap
     wm = bpy.context.window_manager

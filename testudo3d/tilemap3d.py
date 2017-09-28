@@ -10,6 +10,7 @@ from mathutils.kdtree import KDTree
 TOLERANCE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
+CUSTOM_PROP_TILESET = 't3d_tileset'
 ADJACENCY_VECTORS = (
     # DUWSEN
     Vector((0, 1, 0)),
@@ -167,17 +168,6 @@ class Tile3DFinder:
     def get_tiles_at(self, pos):
         return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, TOLERANCE)]
 
-def vector_equal(a, b):
-    return isclose(a.x, b.x, abs_tol=TOLERANCE) and isclose(a.y, b.y, abs_tol=TOLERANCE) and isclose(a.z, b.z, abs_tol=TOLERANCE)
-
-class Tile3DFinderSimple:
-    # test
-    def __init__(self):
-        pass
-
-    def get_tiles_at(self, pos):
-        return [obj for obj in t3d.root.children if obj.layers[t3d.layer] and vector_equal(obj.location, pos)]
-
 class FinderManager:
     def __init__(self):
         self.finder = None # also need one for each root
@@ -203,7 +193,7 @@ class PaintModeState:
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root = None
-        self._layer = None # active layer
+        self.layer = None # active layer
         self.tilesize_z = 1.0
         self.cursor = Cursor()
         self.state = PaintModeState()
@@ -215,6 +205,7 @@ class Tilemap3D:
         self.prop = bpy.context.scene.t3d_prop
         self.lastpos = None
         self.select_cube_redraw = False
+        self.tilesets = None
 
         # init
         # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
@@ -226,17 +217,18 @@ class Tilemap3D:
         return bpy.context.scene.t3d_prop.user_layer
     user_layer = property(get_layer)
 
-    def get_layer(self):
-        return self._layer
-    def set_layer(self, value):
-        self._layer = value
-        self.finder.invalidate()
-    layer = property(get_layer, set_layer)
-
     def init(self):
         self.init_root_obj()
         self.construct_select_cube()
         self.layer = self.user_layer
+
+        prop = bpy.context.scene.t3d_prop
+        prop.tileset_idx = prop.tileset_idx # give it a kick
+        prop.refresh_tilesets()
+
+    def refresh_tilesets(self):
+        prop = bpy.context.scene.t3d_prop
+        self.tilesets = {tileset.tileset: bpy.data.scenes[tileset.tileset] for tileset in prop.tilesets}
 
     def init_root_obj(self):
         self.root = bpy.context.object
@@ -263,6 +255,15 @@ class Tilemap3D:
     def on_update(self):
         self.finder.invalidate()
 
+    def get_tileset_from_group(self, group_name):
+        # todo store in dictionary when refresh tileset list
+        group = bpy.data.groups[group_name]
+        obj = group.objects[0]
+        for scene in self.tilesets.values():
+            if obj.name in scene.objects:
+                # scene == tileset!
+                return scene.name
+
     def get_layers_array(self):
         lst = [False] * 20
         lst[self.layer] = True
@@ -283,15 +284,13 @@ class Tilemap3D:
             self.create_tile(tile3d)
 
     def create_tile(self, group):
-        if group == 'empty':
-            bpy.ops.object.empty_add(layers=self.get_layers_array())
-        else:
-            bpy.ops.object.group_instance_add(group=group, layers=self.get_layers_array())
+        bpy.ops.object.group_instance_add(group=group, layers=self.get_layers_array())
         tile3d = bpy.context.object
         tile3d.empty_draw_size = 0.25
         tile3d.pos = self.cursor.pos
         tile3d.rot = radians(self.cursor.rot)
         tile3d.parent = self.root
+        tile3d[CUSTOM_PROP_TILESET] = self.get_tileset_from_group(group)
         logging.debug("created object {}".format(tile3d.name))
         return tile3d
 
@@ -406,7 +405,7 @@ class Tilemap3D:
             orig_pos = self.cursor.pos
             for item in self.grabbed:
                 self.cursor.pos = item.tile3d.pos
-                self.delete(ignore=item.tile3d)
+                Tilemap3D.delete(self, ignore=item.tile3d) # hacky
             self.cursor.pos = orig_pos
         self.grabbed = None
 
@@ -433,7 +432,7 @@ class Tilemap3D:
                 pos = self.cursor.pos + item.pos_offset
                 rot = degrees(item.rot)
                 cursor = Cursor(item.group, pos, rot)
-                self.do_with_cursor(cursor, self.paint)
+                self.do_with_cursor(cursor, Tilemap3D.paint, self) # hacky
         logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
 
     def do_with_cursor(self, cursor, func, *args, **kw):
