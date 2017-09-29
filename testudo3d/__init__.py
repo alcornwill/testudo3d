@@ -184,6 +184,7 @@ def create_group_instance(group_name):
     bpy.ops.object.empty_add()
     empty = bpy.context.object
     empty.name = group_name
+    empty.empty_draw_size = 0 # don't like everything looking hairy
     empty.dupli_type = 'GROUP'
     empty.dupli_group = group
     return empty
@@ -285,21 +286,22 @@ class T3DProperties(PropertyGroup):
         description='Use outline brush',
         default=False
     )
-    # tile_previews_ = IntProperty() # i want to just use cursor.tile3d, but then can't draw tile previews when not running_modal...
-    # def get_tile_preview(self):
-    #     return T3DProperties.tile_previews_
-    # def set_tile_preview(self, value):
-    #     T3DProperties.tile_previews_ = value
-    #     if T3DOperatorBase.running_modal:
-    #         t3d.cursor.tile3d = T3DProperties.tile_previews[value]
-    #         # todo this can still totally desync, terrible
+    def get_tile_preview(self):
+        if T3DOperatorBase.running_modal:
+            return self.enum_items_dict[t3d.cursor.tile3d]
+        return -1
+    def set_tile_preview(self, value):
+        if T3DOperatorBase.running_modal:
+            id, name, desc, icon, i = self.enum_items[value] # index == i?
+            t3d.cursor.tile3d = id
     tile_previews = EnumProperty(
         name='Tile',
         items=enum_previews,
-        # get=get_tile_preview,
-        # set=set_tile_preview
+        get=get_tile_preview,
+        set=set_tile_preview
     )
     enum_items = []
+    enum_items_dict = {}
     def refresh_tilesets(self):
         # todo also store list of all tiles in tileset?
         prop = bpy.context.scene.t3d_prop
@@ -325,7 +327,7 @@ class T3DProperties(PropertyGroup):
         for i, obj in enumerate(tiles):
             icon = obj.preview.icon_id if obj.preview.is_image_custom else ""
             T3DProperties.enum_items.append((obj.name, obj.name, "", icon, i))
-
+        T3DProperties.enum_items_dict = {id: i for id, name, desc, icon, i in T3DProperties.enum_items}
     tilesets = CollectionProperty(
         name='Tilesets',
         description='Tilesets (for auto-tiling)',
@@ -454,8 +456,10 @@ class T3DToolsPanel(Panel):
         layout.operator(AutoModeOperator.bl_idname)
         layout.prop(prop, 'user_layer')
 
-        layout.template_icon_view(prop, 'tile_previews') # todo don't draw if no previews? or just disable
-        layout.prop(prop, 'tile_previews') # todo don't really want both
+        col = layout.column()
+        col.enabled = T3DOperatorBase.running_modal and t3d.manual_mode
+        col.template_icon_view(prop, 'tile_previews') # todo don't draw if no previews? or just disable
+        col.prop(prop, 'tile_previews')               # don't really want both
 
         row = layout.row()
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
@@ -1035,17 +1039,16 @@ class T3DSetupTilesOperator(Operator):
         self.setup_tiles(context)
         return {'FINISHED'}
 
-    def remove_all_groups(self):
-        deselect_all()
-        select_all(self.objects)
-        bpy.ops.group.objects_remove_all()
-        deselect_all()
-
     def create_groups(self):
         for obj in self.objects:
             children = get_children(obj)
-            group = bpy.data.groups.new(name=obj.name)
-            group.name = obj.name  # insist
+            if obj.name in bpy.data.groups:
+                # reuse
+                group = bpy.data.groups[obj.name]
+                for object in list(group.objects):
+                    group.objects.unlink(object)
+            else:
+                group = bpy.data.groups.new(name=obj.name)
             group.objects.link(obj)
             for child in children:
                 group.objects.link(child)
@@ -1081,7 +1084,6 @@ class T3DSetupTilesOperator(Operator):
         self.objects = [obj for obj in bpy.context.scene.objects if not obj.parent and not obj.hide]
         self.rename_objects()
         self.layout_in_grid()
-        self.remove_all_groups()
         self.create_groups()
         context.scene.is_tileset = True
 
@@ -1111,7 +1113,13 @@ class RoomGenOperator(Operator):
             self.report({'WARNING'}, 'group "Wall", "Floor" or "Ceiling" not found, no tiles generated')
             return
 
-        scene = bpy.data.scenes.new(name=name)
+        if name in bpy.data.scenes:
+            # reuse
+            scene = bpy.data.scenes[name]
+            for obj in list(scene.objects):
+                scene.objects.unlink(obj)
+        else:
+            scene = bpy.data.scenes.new(name=name)
         bpy.context.screen.scene = scene
 
         name = name.lower()
@@ -1139,10 +1147,12 @@ class RoomGenOperator(Operator):
                     obj = create_group_instance(floor)
                     objs.append(obj)
 
-                if not objs: continue
+                # if not objs: continue
                 bpy.ops.object.empty_add()
                 empty = bpy.context.object
                 empty.name = name + format(index, '02d')
+                empty.name = name + format(index, '02d') # insist (can't reuse objects
+                empty.empty_draw_size = 0
                 for obj in objs:
                     obj.parent = empty
 
@@ -1259,7 +1269,7 @@ def register():
         return self.is_tileset_
     def set_is_tileset(self, value):
         self.is_tileset_ = value
-        bpy.types.Scene.t3d_prop.refresh_tilesets()
+        bpy.context.scene.t3d_prop.refresh_tilesets()
         update_3dviews()
     bpy.types.Scene.is_tileset = BoolProperty(name='Is Tileset',
                                               get=get_is_tileset,
