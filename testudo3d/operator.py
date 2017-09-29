@@ -17,7 +17,7 @@ from bpy.types import (
 
 from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
 from .turtle3d import Turtle3D
-from .autotiler3d import AutoTiler3D, CUSTOM_PROP_TILESET
+from .autotiler3d import AutoTiler3D
 
 class Vec2:
     def __init__(self, x, y):
@@ -67,6 +67,7 @@ CYAN = (0.0, 1.0, 1.0, 1.0)
 WHITE = (1.0, 1.0, 1.0, 1.0)
 YELLOW = (1.0, 1.0, 0.0, 1.0)
 PURPLE = (1.0, 0.0, 1.0, 1.0)
+DARK_PURPLE = (0.5, 0.0, 0.5, 1.0)
 GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
 
@@ -188,6 +189,7 @@ class T3DOperatorBase:
         self.select_cube = None
         self.mousepaint = False
         self.lastcoord = None
+        self.tile_under_cursor = False
         self.input_map = [
             KeyInput('ESC', 'PRESS', self.handle_quit),
             KeyInput('RET', 'PRESS', self.handle_paint),
@@ -215,6 +217,8 @@ class T3DOperatorBase:
             KeyInput('LEFTMOUSE', 'PRESS', self.handle_mousepaint),
             KeyInput('LEFTMOUSE', 'RELEASE', self.handle_mousepaint_end),
             KeyInput('TAB', 'PRESS', self.handle_toggle_mousepaint),
+            KeyInput('RIGHT_BRACKET', 'PRESS', self.handle_inc_layer, shift=True),
+            KeyInput('LEFT_BRACKET', 'PRESS', self.handle_dec_layer, shift=True),
             KeyInput('RIGHT_BRACKET', 'PRESS', self.handle_inc_brush_size),
             KeyInput('LEFT_BRACKET', 'PRESS', self.handle_dec_brush_size),
         ]
@@ -251,6 +255,7 @@ class T3DOperatorBase:
                 result = self.handle_input(event)
                 self.redraw_select_cube()
                 self.on_update()
+                self.tile_under_cursor = self.get_tile3d() # todo only update when necessary
                 return result
             return {'PASS_THROUGH'}
         except QuitError:
@@ -266,6 +271,7 @@ class T3DOperatorBase:
         if context.area.type == 'VIEW_3D':
             # init
             self.init()
+            self.construct_select_cube()
             self.init_handlers(context)
             return {'RUNNING_MODAL'}
         else:
@@ -398,12 +404,21 @@ class T3DOperatorBase:
         self.handle_paint_end()
 
     def handle_inc_brush_size(self):
-        prop = bpy.context.scene.t3d_prop
-        prop.brush_size += 1
+        self.prop.brush_size += 1
 
     def handle_dec_brush_size(self):
-        prop = bpy.context.scene.t3d_prop
-        prop.brush_size -= 1
+        self.prop.brush_size -= 1
+
+    def handle_inc_layer(self):
+        self.prop.user_layer += 1
+
+    def handle_dec_layer(self):
+        self.prop.user_layer -= 1
+
+    def redraw_select_cube(self):
+        if self.select_cube_redraw:
+            self.construct_select_cube()
+            self.select_cube_redraw = False
 
     def construct_select_cube(self):
         if self.state.select:
@@ -433,7 +448,8 @@ class T3DOperatorBase:
         mat = mat_world * mat
 
         t_arrow = mat_transform(mat, ARROW)
-        color = PURPLE if not self.state.grab else GREEN
+        color = (GREEN if self.state.grab else
+                 PURPLE if self.tile_under_cursor else DARK_PURPLE)
         draw_poly(t_arrow, color)
 
         brush_size = context.scene.t3d_prop.brush_size
@@ -455,12 +471,12 @@ class T3DOperatorBase:
         text_cursor.x = 20
         text_cursor.y = 140
 
-        tile3d = self.cursor.tile3d
         if self.manual_mode: # hacky
+            tile3d = self.cursor.tile3d
             text = tile3d if tile3d else 'No Active Tile'
             color = WHITE if tile3d else RED
         else:
-            text = self.get_tileset_from_group(tile3d)
+            text = self.tileset
             color = YELLOW
         draw_text_2d(text, size=20, color=color)
 
@@ -496,9 +512,6 @@ class ManualModeOperator(Turtle3D, T3DOperatorBase, Operator):
         Turtle3D.error(self, msg)
         T3DOperatorBase.error(self, msg)
 
-    def construct_select_cube(self):
-        T3DOperatorBase.construct_select_cube(self)
-
 class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     """Automatically generate tiles from terrain"""
     bl_idname = "view3d.t3d_auto"
@@ -525,12 +538,15 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     def validate_tilesets(self):
         notfound = []
         for obj in bpy.data.objects:
-            if CUSTOM_PROP_TILESET in obj:
-                tileset = obj[CUSTOM_PROP_TILESET]
-                if tileset not in self.rulesets and tileset not in notfound:
+            try:
+                tileset = obj.tileset
+            except KeyError:
+                if tileset not in notfound:
                     notfound.append(tileset)
-        for tileset in notfound:
-            self.report({'WARNING'}, 'Tileset "{}" present in scene but rules not found! (did you rename rules.txt file? use RenameTileset)'.format(tileset))
+        if notfound:
+            for tileset in notfound:
+                self.error('Tileset "{}" present in scene but rules not found! (did you rename rules.txt file? use RenameTileset)'.format(tileset))
+            self.on_quit()
 
     def validate_rules(self):
         tiles = [group.name for group in bpy.data.groups]
@@ -549,6 +565,3 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
     def error(self, msg):
         AutoTiler3D.error(self, msg)
         T3DOperatorBase.error(self, msg)
-
-    def construct_select_cube(self):
-        T3DOperatorBase.construct_select_cube(self)

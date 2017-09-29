@@ -6,11 +6,11 @@ import random
 from math import floor, degrees, radians, atan2, sqrt, isclose
 from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.kdtree import KDTree
+from .events import subscribe, unsubscribe, send_event
 
 TOLERANCE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
-CUSTOM_PROP_TILESET = 't3d_tileset'
 ADJACENCY_VECTORS = (
     # DUWSEN
     Vector((0, 1, 0)),
@@ -103,13 +103,18 @@ def init_object_props():
         self.rotation_euler.z = rot
 
     def get_group(self):
-        if self.dupli_group is not None:
+        if self.dupli_group:
             return self.dupli_group.name
+
+    def get_tileset(self):
+        if self.dupli_group:
+            return t3d.get_tileset_from_group(self.dupli_group.name)
 
     # NOTE: these attribute names may conflict with other addons
     bpy.types.Object.pos = property(get_pos, set_pos)
     bpy.types.Object.rot = property(get_rot, set_rot)
     bpy.types.Object.group = property(get_group)
+    bpy.types.Object.tileset = property(get_tileset)
 
 class Cursor:
     def __init__(self, tile3d=None, pos=None, rot=0):
@@ -193,7 +198,6 @@ class PaintModeState:
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root = None
-        self.layer = None # active layer
         self.tilesize_z = 1.0
         self.cursor = Cursor()
         self.state = PaintModeState()
@@ -202,7 +206,7 @@ class Tilemap3D:
         self.clipboard = None
         self.finder = FinderManager()
         self.manual_mode = True # hacky
-        self.prop = bpy.context.scene.t3d_prop
+        self.prop = bpy.context.scene.t3d_prop # i would prefer to not use this at all but it makes sense
         self.lastpos = None
         self.select_cube_redraw = False
         self.tilesets = None
@@ -214,21 +218,31 @@ class Tilemap3D:
         bpy.types.Scene.t3d = self
 
     def get_layer(self):
-        return bpy.context.scene.t3d_prop.user_layer
-    user_layer = property(get_layer)
+        return self.prop.user_layer
+    layer = property(get_layer)
+
+    def get_tileset(self):
+        return self.prop.get_tileset().tileset
+    tileset = property(get_tileset)
 
     def init(self):
         self.init_root_obj()
-        self.construct_select_cube()
-        self.layer = self.user_layer
 
-        prop = bpy.context.scene.t3d_prop
-        prop.tileset_idx = prop.tileset_idx # give it a kick
-        prop.refresh_tilesets()
+        subscribe('set_tile3d', self.set_tile3d)
+        subscribe('refresh_tilesets', self.refresh_tilesets)
+
+        self.prop.tileset_idx = self.prop.tileset_idx # give it a kick
+        self.prop.refresh_tilesets()
+
+    def set_tile3d(self, tile3d):
+        self.cursor.tile3d = tile3d
 
     def refresh_tilesets(self):
-        prop = bpy.context.scene.t3d_prop
-        self.tilesets = {tileset.tileset: bpy.data.scenes[tileset.tileset] for tileset in prop.tilesets}
+        self.tilesets = {tileset.tileset: bpy.data.scenes[tileset.tileset] for tileset in self.prop.tilesets}
+        # optimized search tileset from tile3d
+        self.search_tile3d = {tile3d.tile3d: tileset.tileset
+                              for tileset in self.prop.tilesets
+                              for tile3d in tileset.tiles}
 
     def init_root_obj(self):
         self.root = bpy.context.object
@@ -248,6 +262,8 @@ class Tilemap3D:
 
     def on_quit(self):
         self.root[CUSTOM_PROP_LAST_CURSOR] = self.cursor.serialize()
+        unsubscribe('refresh_tilesets', self.refresh_tilesets)
+        unsubscribe('set_tile3d', self.set_tile3d)
 
     def error(self, msg):
         logging.error(msg)
@@ -256,13 +272,7 @@ class Tilemap3D:
         self.finder.invalidate()
 
     def get_tileset_from_group(self, group_name):
-        # todo store in dictionary when refresh tileset list
-        group = bpy.data.groups[group_name]
-        obj = group.objects[0]
-        for scene in self.tilesets.values():
-            if obj.name in scene.objects:
-                # scene == tileset!
-                return scene.name
+        return self.search_tile3d[group_name]
 
     def get_layers_array(self):
         lst = [False] * 20
@@ -290,7 +300,6 @@ class Tilemap3D:
         tile3d.pos = self.cursor.pos
         tile3d.rot = radians(self.cursor.rot)
         tile3d.parent = self.root
-        tile3d[CUSTOM_PROP_TILESET] = self.get_tileset_from_group(group)
         logging.debug("created object {}".format(tile3d.name))
         return tile3d
 
@@ -472,14 +481,6 @@ class Tilemap3D:
                     self.cursor.pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
                     func(*args, **kw)
         self.cursor.pos = orig_pos
-
-    def redraw_select_cube(self):
-        if self.select_cube_redraw:
-            self.construct_select_cube()
-            self.select_cube_redraw = False
-
-    def construct_select_cube(self):
-        pass
 
     def select_cube_bounds(self):
         start = self.select_start_pos

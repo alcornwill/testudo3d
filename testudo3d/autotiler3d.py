@@ -3,7 +3,7 @@ import logging
 from math import radians
 from random import choice
 import bpy
-from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS, CUSTOM_PROP_TILESET
+from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS
 from .turtle3d import Turtle3D
 
 CUSTOM_PROP_RULES_FILE = 't3d_rules_file'
@@ -85,7 +85,6 @@ class AutoTiler3D(Turtle3D):
     # sounds buggy
     def __init__(self, *args, **kw):
         Turtle3D.__init__(self, *args, **kw)
-        self.tileset_ = None
         self.manual_mode = False
         self.changed = []
 
@@ -108,6 +107,10 @@ class AutoTiler3D(Turtle3D):
                 self.on_quit()
                 return
 
+    def refresh_tilesets(self):
+        Turtle3D.refresh_tilesets(self)
+        self.init_rules()
+
     def delete(self, ignore=None):
         Turtle3D.delete(self, ignore)
         self.finder.invalidate()
@@ -115,7 +118,7 @@ class AutoTiler3D(Turtle3D):
 
     def paint(self):
         Turtle3D.delete(self)
-        self.new_auto_tile(self.tileset.tileset)
+        self.new_auto_tile(self.tileset)
         self.finder.invalidate()
         self.repaint_adjacent()
 
@@ -151,16 +154,15 @@ class AutoTiler3D(Turtle3D):
         if rule:
             tile3d = self.create_tile(rule.tile3d)
             tile3d.rot = radians(rule.rot)
-            tile3d[CUSTOM_PROP_TILESET] = tileset
 
     def auto_tiling(self):
         # check adjacent cells if occupied
         center, adjacent = self.get_occupied()
         if not center: return # nothing to repaint
-        if CUSTOM_PROP_TILESET not in center[0]: return # just a normal object
+        tileset = center[0].tileset
+        if not tileset: return # just a normal object
 
         bitmask = self.get_bitmask(adjacent)
-        tileset = center[0][CUSTOM_PROP_TILESET]
         ruleset = self.rulesets[tileset]
         rule = ruleset.get(bitmask)
 
@@ -169,4 +171,3 @@ class AutoTiler3D(Turtle3D):
         if rule:
             tile3d = self.create_tile(rule.tile3d)
             tile3d.rot = radians(rule.rot)
-            tile3d[CUSTOM_PROP_TILESET] = tileset
