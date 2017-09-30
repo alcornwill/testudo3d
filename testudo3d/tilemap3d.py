@@ -414,7 +414,7 @@ class Tilemap3D:
             orig_pos = self.cursor.pos
             for item in self.grabbed:
                 self.cursor.pos = item.tile3d.pos
-                Tilemap3D.delete(self, ignore=item.tile3d) # hacky
+                self.delete(ignore=item.tile3d)
             self.cursor.pos = orig_pos
         self.grabbed = None
 
@@ -441,7 +441,7 @@ class Tilemap3D:
                 pos = self.cursor.pos + item.pos_offset
                 rot = degrees(item.rot)
                 cursor = Cursor(item.group, pos, rot)
-                self.do_with_cursor(cursor, Tilemap3D.paint, self) # hacky
+                self.do_with_cursor(cursor, self.paint)
         logging.debug("pasted {} objects".format(len(self.clipboard) if self.clipboard else "0"))
 
     def do_with_cursor(self, cursor, func, *args, **kw):

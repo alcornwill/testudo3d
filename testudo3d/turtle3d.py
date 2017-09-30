@@ -1,16 +1,19 @@
 
 import logging
 import bpy
-from .tilemap3d import Tilemap3D, round_vector
-from math import radians, floor
+from .tilemap3d import Tilemap3D
+from .autotiler3d import AutoTiler3D
 from mathutils import Matrix, Vector
 
 class Turtle3D(Tilemap3D):
     # turtle graphics (sort-of)
     # https://docs.python.org/3/library/turtle.html
-    def __init__(self, *args, **kw):
-        Tilemap3D.__init__(self, *args, **kw)
-        self.w = 1 # width
+    def __init__(self):
+        pass
+
+    def goto(self, x, y):
+        self._goto(x, y)
+        self.select_cube_redraw = True
 
     def forward(self, i):
         vec = Vector((0, i, 0))
@@ -57,7 +60,7 @@ class Turtle3D(Tilemap3D):
     #    ...
 
     def settile3d(self, name):
-        self.set_active_tile3d(name)
+        self.set_tile3d(name)
 
     def home(self):
         self.goto(0, 0)
@@ -96,3 +99,13 @@ class Turtle3D(Tilemap3D):
         # state = State(delete=True)
         # self.do_with_state(state, self.end_select)
         # ?
+
+class ManualTurtle3D(Tilemap3D, Turtle3D):
+    def __init__(self):
+        Tilemap3D.__init__(self)
+        Turtle3D.__init__(self)
+
+class AutoTurtle3D(AutoTiler3D, Turtle3D):
+    def __init__(self):
+        Tilemap3D.__init__(self)
+        AutoTiler3D.__init__(self)

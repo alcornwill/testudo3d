@@ -15,8 +15,7 @@ from bpy.types import (
     UIList
 )
 
-from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
-from .turtle3d import Turtle3D
+from .tilemap3d import Tilemap3D, round_vector
 from .autotiler3d import AutoTiler3D
 
 class Vec2:
@@ -72,6 +71,9 @@ GREY = (0.5, 0.5, 0.5, 1.0)
 FONT_ID = 0  # hmm
 
 text_cursor = Vec2(0, 0)  # used for UI
+
+def clamp(a, b, c):
+    return max(b, min(a, c))
 
 def draw_line_3d(start, end):
     bgl.glVertex3f(*start)
@@ -352,10 +354,12 @@ class T3DOperatorBase:
         bpy.ops.ed.undo_push()
 
     def handle_undo(self):
-        self.undo()
+        # self.undo()
+        pass
 
     def handle_redo(self):
-        self.redo()
+        # self.redo()
+        pass
 
     def handle_select(self):
         if self.state.grab:
@@ -411,9 +415,11 @@ class T3DOperatorBase:
 
     def handle_inc_layer(self):
         self.prop.user_layer += 1
+        self.prop.user_layer = clamp(self.prop.user_layer, 0, 19)
 
     def handle_dec_layer(self):
         self.prop.user_layer -= 1
+        self.prop.user_layer = clamp(self.prop.user_layer, 0, 19)
 
     def redraw_select_cube(self):
         if self.select_cube_redraw:
@@ -486,13 +492,13 @@ class T3DOperatorBase:
 
         restore_gl_defaults()
 
-class ManualModeOperator(Turtle3D, T3DOperatorBase, Operator):
+class ManualModeOperator(Tilemap3D, T3DOperatorBase, Operator):
     """Manually position tiles"""
     bl_idname = "view3d.t3d_manual"
     bl_label = "Manual Mode"
 
     def __init__(self):
-        Turtle3D.__init__(self)
+        Tilemap3D.__init__(self)
         T3DOperatorBase.__init__(self)
 
     @classmethod
@@ -505,11 +511,11 @@ class ManualModeOperator(Turtle3D, T3DOperatorBase, Operator):
         return T3DOperatorBase.poll(context)
 
     def on_quit(self):
-        Turtle3D.on_quit(self)
+        Tilemap3D.on_quit(self)
         T3DOperatorBase.on_quit(self)
 
     def error(self, msg):
-        Turtle3D.error(self, msg)
+        Tilemap3D.error(self, msg)
         T3DOperatorBase.error(self, msg)
 
 class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):

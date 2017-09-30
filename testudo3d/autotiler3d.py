@@ -3,8 +3,7 @@ import logging
 from math import radians
 from random import choice
 import bpy
-from .tilemap3d import any, Cursor, Tile3DFinder, ADJACENCY_VECTORS
-from .turtle3d import Turtle3D
+from .tilemap3d import any, Cursor, Tilemap3D, Tile3DFinder, ADJACENCY_VECTORS
 
 CUSTOM_PROP_RULES_FILE = 't3d_rules_file'
 
@@ -76,7 +75,7 @@ def parse_rules(text):
 
     return Ruleset(rules, default)
 
-class AutoTiler3D(Turtle3D):
+class AutoTiler3D(Tilemap3D):
     # todo ok this is still really inefficient for region operations (fill/clear)
     # in such cases each cell can be repainted up to 6 times!
     # the code is much simpler this way though...
@@ -84,12 +83,13 @@ class AutoTiler3D(Turtle3D):
     # then go round and create all the objects
     # sounds buggy
     def __init__(self, *args, **kw):
-        Turtle3D.__init__(self, *args, **kw)
+        Tilemap3D.__init__(self, *args, **kw)
         self.manual_mode = False
         self.changed = []
+        self.alt = True # auto-tiling mode
 
     def init(self):
-        Turtle3D.init(self)
+        Tilemap3D.init(self)
         self.init_rules()
 
     def init_rules(self):
@@ -103,24 +103,40 @@ class AutoTiler3D(Turtle3D):
             try:
                 self.rulesets[scene.name] = parse_rules(text) # note: monkey patching
             except ValueError as e:
-                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.path, e.line_no, e.line))
+                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(scene.rules, e.line_no, e.line))
                 self.on_quit()
                 return
 
     def refresh_tilesets(self):
-        Turtle3D.refresh_tilesets(self)
+        Tilemap3D.refresh_tilesets(self)
         self.init_rules()
 
     def delete(self, ignore=None):
-        Turtle3D.delete(self, ignore)
-        self.finder.invalidate()
-        self.repaint_adjacent()
+        Tilemap3D.delete(self, ignore)
+        if self.alt:
+            self.finder.invalidate()
+            self.repaint_adjacent()
 
     def paint(self):
-        Turtle3D.delete(self)
-        self.new_auto_tile(self.tileset)
-        self.finder.invalidate()
-        self.repaint_adjacent()
+        if self.alt:
+            Tilemap3D.delete(self)
+            self.new_auto_tile(self.tileset)
+            self.finder.invalidate()
+            self.repaint_adjacent()
+        else:
+            Tilemap3D.paint(self)
+
+    def paste(self):
+        # no auto-tiling
+        self.alt = False
+        Tilemap3D.paste(self)
+        self.alt = True
+
+    def end_grab(self):
+        # no auto-tiling
+        self.alt = False
+        Tilemap3D.end_grab(self)
+        self.alt = True
 
     def get_occupied(self):
         center = self.finder.get_tiles_at(self.cursor.pos)

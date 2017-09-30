@@ -29,8 +29,8 @@ bl_info = {
     "category": "3D View",
 }
 
-from os.path import splitext, basename, dirname, join
 import logging
+from os.path import splitext, basename, dirname, join
 import bpy
 from math import ceil, sqrt, radians, degrees
 from bpy.props import (
@@ -455,7 +455,7 @@ class CursorToSelected(Operator):
 
 class Goto3DCursor(Operator):
     bl_idname = "view_3d.t3d_goto_3dcursor"
-    bl_label = "Line"
+    bl_label = "Line To 3D Cursor"
     bl_description = 'Draw a line to the 3D cursor'
 
     @classmethod
@@ -469,6 +469,7 @@ class Goto3DCursor(Operator):
         pos = (context.space_data.cursor_location - t3d.root.location) * mat_world
         round_vector(pos)
         t3d.line(pos.x, pos.y)
+        t3d.construct_select_cube()
         return {'FINISHED'}
 
 class AlignTiles(Operator):
