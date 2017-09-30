@@ -161,17 +161,24 @@ class Clipboard:
         self.rot = tile3d.rot
 
 class Tile3DFinder:
-    def __init__(self):
-        self.childs = [c for c in t3d.root.children if c.layers[t3d.layer]]
-        size = len(self.childs)
+    def __init__(self, objects=None):
+        self.cached = {}
+        self.objects = objects or [c for c in t3d.root.children if c.layers[t3d.layer]]
+        size = len(self.objects)
         self.kd = KDTree(size)
 
-        for i, child in enumerate(self.childs):
+        for i, child in enumerate(self.objects):
             self.kd.insert(child.pos, i)
         self.kd.balance()
 
     def get_tiles_at(self, pos):
-        return [self.childs[index] for pos, index, dist in self.kd.find_range(pos, TOLERANCE)]
+        vec = pos.copy().freeze()
+        if vec in self.cached:
+            return self.cached[vec]
+        else:
+            objs = [self.objects[index] for pos, index, dist in self.kd.find_range(pos, TOLERANCE)]
+            self.cached[vec] = objs
+            return objs
 
 class FinderManager:
     def __init__(self):
@@ -186,6 +193,9 @@ class FinderManager:
 
     def invalidate(self):
         self.invalidated = True
+
+    def reset(self, objects=None):
+        self.finder = Tile3DFinder(objects)
 
 class PaintModeState:
     paint = False
@@ -321,7 +331,7 @@ class Tilemap3D:
             logging.warning('Object deleted twice')
         logging.debug("deleted 1 object")
 
-    def _cdraw(self):
+    def cdraw(self):
         if self.state.paint:
             self.paint()
         elif self.state.delete:
@@ -335,7 +345,7 @@ class Tilemap3D:
             else:
                 self.circfill(radius)
         else:
-            self._cdraw()
+            self.cdraw()
 
     def rotate(self, rot):
         # rotate the cursor and paint
@@ -353,7 +363,7 @@ class Tilemap3D:
                 self.select_start_pos = self.select_start_pos + self.cursor.pos
                 self.select_cube_redraw = True
         self.cursor.rot = self.cursor.rot + rot
-        self._cdraw()
+        self.cdraw()
 
     def translate(self, x, y, z):
         # translate the cursor and paint
@@ -457,7 +467,7 @@ class Tilemap3D:
 
     def end_select(self):
         logging.debug("end box select")
-        self.do_region(self._cdraw)
+        self.do_region(self.cdraw)
         self.state.select = False
         self.select_cube_redraw = True
 
@@ -496,7 +506,7 @@ class Tilemap3D:
 
     def plot(self, x, y):
         self._goto(x,y)
-        self._cdraw()
+        self.cdraw()
 
     def circle(self, radius):
         x0, y0, z = self.cursor.pos

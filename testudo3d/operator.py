@@ -198,6 +198,7 @@ class T3DOperatorBase:
             KeyInput('RET', 'RELEASE', self.handle_paint_end),
             KeyInput('X', 'PRESS', self.handle_delete),
             KeyInput('X', 'RELEASE', self.handle_delete_end),
+            # SHIFT + X delete all layers?
             KeyInput('G', 'PRESS', self.handle_grab, None),
             KeyInput('LEFT_ARROW', 'PRESS', lambda: self.translate(-1, 0, 0), ctrl=True),
             KeyInput('RIGHT_ARROW', 'PRESS', lambda: self.translate(1, 0, 0), ctrl=True),

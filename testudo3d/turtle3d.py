@@ -5,7 +5,7 @@ from .tilemap3d import Tilemap3D
 from .autotiler3d import AutoTiler3D
 from mathutils import Matrix, Vector
 
-class Turtle3D(Tilemap3D):
+class Turtle3D:
     # turtle graphics (sort-of)
     # https://docs.python.org/3/library/turtle.html
     def __init__(self):
@@ -101,11 +101,11 @@ class Turtle3D(Tilemap3D):
         # ?
 
 class ManualTurtle3D(Tilemap3D, Turtle3D):
-    def __init__(self):
-        Tilemap3D.__init__(self)
+    def __init__(self, *args, **kw):
+        Tilemap3D.__init__(self, *args, **kw)
         Turtle3D.__init__(self)
 
 class AutoTurtle3D(AutoTiler3D, Turtle3D):
-    def __init__(self):
-        Tilemap3D.__init__(self)
-        AutoTiler3D.__init__(self)
+    def __init__(self, *args, **kw):
+        AutoTiler3D.__init__(self, *args, **kw)
+        Turtle3D.__init__(self)
