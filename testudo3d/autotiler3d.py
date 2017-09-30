@@ -3,7 +3,7 @@ import logging
 from math import radians
 from random import choice
 import bpy
-from .tilemap3d import any, Cursor, Tilemap3D, Tile3DFinder, ADJACENCY_VECTORS
+from .tilemap3d import Tilemap3D, ADJACENCY_VECTORS, round_vector
 
 CUSTOM_PROP_RULES_FILE = 't3d_rules_file'
 
@@ -87,6 +87,7 @@ class AutoTiler3D(Tilemap3D):
         self.manual_mode = False
         self.changed = []
         self.alt = True # auto-tiling mode
+        self.touched = None
 
     def init(self):
         Tilemap3D.init(self)
@@ -145,9 +146,8 @@ class AutoTiler3D(Tilemap3D):
 
     def repaint_adjacent(self):
         orig_pos = self.cursor.pos
-        for vec in ADJACENCY_VECTORS:
-            cursor = Cursor(None, orig_pos + vec, 0)
-            self.do_with_cursor(cursor, self.auto_tiling)
+        points = [orig_pos + vec for vec in ADJACENCY_VECTORS]
+        self.do_points(points, self.optimized_auto_tiling)
         self.finder.invalidate() # hmm, calling this quite a lot
 
     def get_bitmask(self, adjacent):
@@ -169,77 +169,65 @@ class AutoTiler3D(Tilemap3D):
             tile3d = self.create_tile(rule.tile3d)
             tile3d.rot = radians(rule.rot)
 
-    def do_region(self, func, *args, **kw):
-        if func == self.cdraw and self.state.paint:
-            # completely override behaviour (optimization)
-            # clear region first
-            self.alt = False
-            Tilemap3D.do_region(self, self.delete)
-            self.alt = True
-            self.finder.reset()
-            # create a fake scene state
-            objects = list(self.finder.finder.objects)
-            class FakeObject:
-                def __init__(self, pos):
-                    self.pos = pos
-            def fake_paint(objects):
-                obj = FakeObject(self.cursor.pos.copy())
-                objects.append(obj)
-            Tilemap3D.do_region(self, fake_paint, objects)
-            self.finder.reset(objects)
-            # get bitmasks for fake state
-            bitmasks = {}
-            def get_bitmask(bitmasks):
-                adjacent = [self.finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
-                bitmask = self.get_bitmask(adjacent)
-                pos = self.cursor.pos.copy().freeze()
-                bitmasks[pos] = bitmask
-            Tilemap3D.do_region(self, get_bitmask, bitmasks)
-            # do paint
-            Tilemap3D.do_region(self, self.optimized_new_auto_tile, bitmasks)
-            # for each 'face' of selection bounds do auto_tiling
-            cube_min, cube_max = self.select_cube_bounds()
-            def repaint_perimeter(cube_min, cube_max):
-                # todo didn't work once, floating point error? (use isclose)
-                pos = self.cursor.pos
-                if pos.x == cube_min.x:
-                    pos.x -= 1; self.auto_tiling(); pos.x += 1
-                if pos.y == cube_min.y:
-                    pos.y -= 1; self.auto_tiling(); pos.y += 1
-                if pos.z == cube_min.z:
-                    pos.z -= 1; self.auto_tiling(); pos.z += 1
-                if pos.x == cube_max.x:
-                    pos.x += 1; self.auto_tiling(); pos.x -= 1
-                if pos.y == cube_max.y:
-                    pos.y += 1; self.auto_tiling(); pos.y -= 1
-                if pos.z == cube_max.z:
-                    pos.z += 1; self.auto_tiling(); pos.z -= 1
-            Tilemap3D.do_region(self, repaint_perimeter, cube_min, cube_max)
-        elif func == self.cdraw and self.state.delete:
-            # clear region
-            self.alt = False
-            Tilemap3D.do_region(self, self.delete)
-            self.alt = True
-            self.finder.reset()
-            # for each 'face' of selection bounds do auto_tiling
-            cube_min, cube_max = self.select_cube_bounds()
-            def repaint_perimeter(cube_min, cube_max):
-                pos = self.cursor.pos
-                if pos.x == cube_min.x:
-                    pos.x -= 1; self.auto_tiling(); pos.x += 1
-                if pos.y == cube_min.y:
-                    pos.y -= 1; self.auto_tiling(); pos.y += 1
-                if pos.z == cube_min.z:
-                    pos.z -= 1; self.auto_tiling(); pos.z += 1
-                if pos.x == cube_max.x:
-                    pos.x += 1; self.auto_tiling(); pos.x -= 1
-                if pos.y == cube_max.y:
-                    pos.y += 1; self.auto_tiling(); pos.y -= 1
-                if pos.z == cube_max.z:
-                    pos.z += 1; self.auto_tiling(); pos.z -= 1
-            Tilemap3D.do_region(self, repaint_perimeter, cube_min, cube_max)
-        else:
-            Tilemap3D.do_region(self, func, *args, **kw)
+    def batch_cdraw(self, points):
+        # completely override behaviour (optimization)
+        if self.state.paint:
+            self.optimized_paint(points)
+        elif self.state.delete:
+            self.optimized_delete(points)
+
+    def optimized_paint(self, points):
+        # clear region first
+        self.do_points(points, Tilemap3D.delete, self)
+        self.finder.reset()
+
+        # create a fake scene state
+        objects = list(self.finder.finder.objects)
+        class FakeObject:
+            def __init__(self, pos):
+                self.pos = pos
+        def fake_paint(objects):
+            obj = FakeObject(self.cursor.pos.copy())
+            objects.append(obj)
+        self.do_points(points, fake_paint, objects)
+        self.finder.reset(objects)
+
+        # get bitmasks for fake state
+        bitmasks = {}
+        def get_bitmasks(bitmasks):
+            adjacent = [self.finder.get_tiles_at(self.cursor.pos + vec) for vec in ADJACENCY_VECTORS]
+            bitmask = self.get_bitmask(adjacent)
+            pos = self.cursor.pos.copy().freeze()
+            bitmasks[pos] = bitmask
+        self.do_points(points, get_bitmasks, bitmasks)
+
+        # do paint
+        self.do_points(points, self.optimized_new_auto_tile, bitmasks)
+
+        # do repaint adjacent
+        self.optimized_repaint_adjacent(points)
+
+    def optimized_delete(self, points):
+        # clear region
+        self.do_points(points, Tilemap3D.delete, self)
+        self.finder.reset()
+
+        # do repaint adjacent
+        self.optimized_repaint_adjacent(points)
+
+    def optimized_repaint_adjacent(self, points):
+        for point in points: round_vector(point)
+        self.touched = list(points)
+        self.do_points(points, self.repaint_adjacent)
+        self.touched = None
+
+    def optimized_auto_tiling(self):
+        pos = self.cursor.pos.copy()
+        round_vector(pos)
+        if self.touched is not None:
+            if pos in self.touched: return
+            self.touched.append(pos)
+        self.auto_tiling()
 
     def new_auto_tile(self):
         # same as auto_tile but always create at center

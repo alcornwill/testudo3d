@@ -27,9 +27,6 @@ def get_key(dict_, key, default=None):
     except KeyError:
         return default
 
-def any(lst):
-    return len(lst) > 0
-
 def roundbase(x, base):
     return int(base * round(float(x)/base))
 
@@ -66,6 +63,9 @@ def normalized_XY_to_Zrot_rad(x, y):
     return atan2(-x, y)
 
 def round_vector(vec):
+    # it's a shame there's not an IntVector
+    # might have to do less rounding
+    # (hmm, could you just make it? no static types in python though)
     vec.x = round(vec.x)
     vec.y = round(vec.y)
     vec.z = round(vec.z)
@@ -223,7 +223,8 @@ class Tilemap3D:
 
         # init
         # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.WARNING)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
 
@@ -299,9 +300,9 @@ class Tilemap3D:
 
     def paint(self):
         tile3d = self.cursor.tile3d
-        if tile3d is not None:
-            self.delete()
-            self.create_tile(tile3d)
+        if not tile3d: return
+        self.delete()
+        self.create_tile(tile3d)
 
     def create_tile(self, group):
         bpy.ops.object.group_instance_add(group=group, layers=self.get_layers_array())
@@ -317,7 +318,7 @@ class Tilemap3D:
         tiles = self._get_tiles()
         if ignore and ignore in tiles:
             tiles.remove(ignore)
-        if any(tiles):
+        if tiles:
             tile3d = tiles[0] # assume only one
             self.delete_tile(tile3d)
 
@@ -467,30 +468,28 @@ class Tilemap3D:
 
     def end_select(self):
         logging.debug("end box select")
-        self.do_region(self.cdraw)
+        points = self.region_points()
+        self.batch_cdraw(points)
         self.state.select = False
         self.select_cube_redraw = True
 
     def get_selected_tiles(self):
         # get tiles within selection bounds
+        points = self.region_points()
         tiles = []
         def get_tiles(tiles):
             tile3d = t3d.get_tile3d()
             if tile3d:
                 tiles.append(tile3d)
-        self.do_region(get_tiles, tiles)
+        self.do_points(points, get_tiles, tiles)
         return tiles
 
-    def do_region(self, func, *args, **kw):
-        # do func for each cell in select bounds
-        orig_pos = self.cursor.pos
+    def region_points(self):
         cube_min, cube_max = self.select_cube_bounds()
-        for z in range(int(round(abs(cube_max.z + 1 - cube_min.z)))):
-            for y in range(int(round(abs(cube_max.y + 1 - cube_min.y)))):
-                for x in range(int(round(abs(cube_max.x + 1 - cube_min.x)))):
-                    self.cursor.pos = Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
-                    func(*args, **kw)
-        self.cursor.pos = orig_pos
+        return [Vector((cube_min.x + x, cube_min.y + y, cube_min.z + z))
+                for x in range(int(round(abs(cube_max.x + 1 - cube_min.x))))
+                for y in range(int(round(abs(cube_max.y + 1 - cube_min.y))))
+                for z in range(int(round(abs(cube_max.z + 1 - cube_min.z))))]
 
     def select_cube_bounds(self):
         start = self.select_start_pos
@@ -498,6 +497,17 @@ class Tilemap3D:
         cube_min = Vector((min(start.x, end.x), min(start.y, end.y), min(start.z, end.z)))
         cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
         return cube_min, cube_max
+
+    def batch_cdraw(self, points):
+        self.do_points(points, self.cdraw)
+
+    def do_points(self, points, func, *args, **kw):
+        # do func for each point in points
+        orig_pos = self.cursor.pos
+        for pos in points:
+            self.cursor.pos = pos
+            func(*args, **kw)
+        self.cursor.pos = orig_pos
 
     def _goto(self, x, y):
         self.cursor.pos.x = x
@@ -510,55 +520,15 @@ class Tilemap3D:
 
     def circle(self, radius):
         x0, y0, z = self.cursor.pos
-        x = radius
-        y = 0
-        err = 0
-
-        while x >= y:
-            self.plot(x0 + x, y0 + y)
-            self.plot(x0 + y, y0 + x)
-            self.plot(x0 - y, y0 + x)
-            self.plot(x0 - x, y0 + y)
-            self.plot(x0 - x, y0 - y)
-            self.plot(x0 - y, y0 - x)
-            self.plot(x0 + y, y0 - x)
-            self.plot(x0 + x, y0 - y)
-
-            y += 1
-            if err <= 0:
-                err += 2*y + 1
-            if err > 0:
-                x -= 1
-                err -= 2*x + 1
+        points = circle_points(radius, x0, y0, z)
+        self.batch_cdraw(points)
         self._goto(x0,y0)
 
     def circfill(self, radius):
-        # todo this sometimes is rubbish...
         cx, cy, z = self.cursor.pos
-        x = radius
-        y = 0
-        err = -radius
-
-        while y <= x:
-            lasty = y
-            err += y
-            y += 1
-            err += y
-            self.plot4(cx, cy, x, lasty)
-            if err > 0:
-                if x != lasty:
-                    self.plot4(cx, cy, lasty, x)
-                err -= x
-                x -= 1
-                err -= x
+        points = circfill_points(cx, cy, radius, z)
+        self.batch_cdraw(points)
         self._goto(cx, cy)
-
-    def plot4(self, cx, cy, x, y):
-        self._goto(cx - x, cy + y)
-        self.line(cx + x, cy + y)
-        if x != 0 and y != 0:
-            self._goto(cx - x, cy - y)
-            self.line(cx + x, cy - y)
 
     def line(self, x2, y2):
         x1, y1, z = self.cursor.pos
@@ -567,46 +537,106 @@ class Tilemap3D:
         x2 = int(x2)
         y2 = int(y2)
 
-        dx = x2 - x1
-        dy = y2 - y1
-
-        if dx == 0:
-            step = 1 if dy > 0 else -1
-            for y in range(y1, y2+step, step):
-                self.plot(x1, y)
-        elif dy == 0:
-            step = 1 if dx > 0 else -1
-            for x in range(x1, x2+step, step):
-                self.plot(x, y1)
-        else:
-            if dy < 0:
-                dy = -dy
-                stepy = -1
-            else:
-                stepy = 1
-
-            if dx < 0:
-                dx = -dx
-                stepx = -1
-            else:
-                stepx = 1
-
-            if dx > dy:
-                frac = dy - (dx >> 1)
-                while x1 != x2:
-                    if frac >= 0:
-                        y1 = y1 + stepy
-                        frac = frac - dx
-                    x1 = x1 + stepx
-                    frac = frac + dy
-                    self.plot(x1, y1)
-            else:
-                frac = dx - (dy >> 1)
-                while y1 != y2:
-                    if frac >= 0:
-                        x1 = x1 + stepx
-                        frac = frac - dy
-                    y1 = y1 + stepy
-                    frac = frac + dx
-                    self.plot(x1, y1)
+        points = line_points(x1, x2, y1, y2, z)
+        self.batch_cdraw(points)
         self._goto(x2,y2)
+
+def circle_points(radius, x0, y0, z):
+    x = radius
+    y = 0
+    err = 0
+    points = []
+    while x >= y:
+        points += [
+            Vector((x0 + x, y0 + y, z)),
+            Vector((x0 + y, y0 + x, z)),
+            Vector((x0 - y, y0 + x, z)),
+            Vector((x0 - x, y0 + y, z)),
+            Vector((x0 - x, y0 - y, z)),
+            Vector((x0 - y, y0 - x, z)),
+            Vector((x0 + y, y0 - x, z)),
+            Vector((x0 + x, y0 - y, z))
+        ]
+
+        y += 1
+        if err <= 0:
+            err += 2 * y + 1
+        if err > 0:
+            x -= 1
+            err -= 2 * x + 1
+    return points
+
+def plot4(cx, cy, x, y, z):
+    cx = int(cx)
+    cy = int(cy)
+    x = int(x)
+    y = int(y)
+
+    points = line_points(cx - x, cx + x, cy + y, cy + y, z)
+    if x != 0 and y != 0:
+        points += line_points(cx - x, cx + x, cy - y, cy - y, z)
+    return points
+
+def circfill_points(cx, cy, radius, z):
+    x = radius
+    y = 0
+    err = -radius
+    points = []
+    while y <= x:
+        lasty = y
+        err += y
+        y += 1
+        err += y
+        points += plot4(cx, cy, x, lasty, z)
+        if err > 0:
+            if x != lasty:
+                points += plot4(cx, cy, lasty, x, z)
+            err -= x
+            x -= 1
+            err -= x
+    return points
+
+def line_points(x1, x2, y1, y2, z):
+    points = []
+    dx = x2 - x1
+    dy = y2 - y1
+    if dx == 0:
+        step = 1 if dy > 0 else -1
+        for y in range(y1, y2 + step, step):
+            points.append(Vector((x1, y, z)))
+    elif dy == 0:
+        step = 1 if dx > 0 else -1
+        for x in range(x1, x2 + step, step):
+            points.append(Vector((x, y1, z)))
+    else:
+        if dy < 0:
+            dy = -dy
+            stepy = -1
+        else:
+            stepy = 1
+
+        if dx < 0:
+            dx = -dx
+            stepx = -1
+        else:
+            stepx = 1
+
+        if dx > dy:
+            frac = dy - (dx >> 1)
+            while x1 != x2:
+                if frac >= 0:
+                    y1 = y1 + stepy
+                    frac = frac - dx
+                x1 = x1 + stepx
+                frac = frac + dy
+                points.append(Vector((x1, y1, z)))
+        else:
+            frac = dx - (dy >> 1)
+            while y1 != y2:
+                if frac >= 0:
+                    x1 = x1 + stepx
+                    frac = frac - dy
+                y1 = y1 + stepy
+                frac = frac + dx
+                points.append(Vector((x1, y1, z)))
+    return points

@@ -455,8 +455,8 @@ class CursorToSelected(Operator):
 
 class Goto3DCursor(Operator):
     bl_idname = "view_3d.t3d_goto_3dcursor"
-    bl_label = "Line To 3D Cursor"
-    bl_description = 'Draw a line to the 3D cursor'
+    bl_label = "Goto 3D Cursor"
+    bl_description = "Go to the 3D cursor (draws line if 'down')"
 
     @classmethod
     def poll(cls, context):
