@@ -544,12 +544,12 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
 
     def init(self):
         AutoTiler3D.init(self)
-        self.validate_tilesets()
+        # self.validate_tilesets() # don't care anymore
         self.validate_rules()
 
     def validate_tilesets(self):
         notfound = []
-        for obj in bpy.data.objects:
+        for obj in bpy.context.scene.objects:
             try:
                 tileset = obj.tileset
             except KeyError:

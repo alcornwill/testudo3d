@@ -11,6 +11,7 @@ from .events import subscribe, unsubscribe, send_event
 TOLERANCE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
+CUSTOM_PROP_TILESET = 't3d_tileset'
 ADJACENCY_VECTORS = (
     # DUWSEN
     Vector((0, 1, 0)),
@@ -205,6 +206,11 @@ class PaintModeState:
 
 # tilesize = Vector((1.0, 1.0, 1.0))
 
+class Tileset:
+    def __init__(self, tiles, rules):
+        self.tiles = tiles
+        self.rules = rules
+
 class Tilemap3D:
     def __init__(self, logging_level=logging.INFO):
         self.root = None
@@ -249,7 +255,8 @@ class Tilemap3D:
         self.cursor.tile3d = tile3d
 
     def refresh_tilesets(self):
-        self.tilesets = {tileset.tileset: bpy.data.scenes[tileset.tileset] for tileset in self.prop.tilesets}
+        self.tilesets = {tileset.tileset: Tileset([tile3d.tile3d for tile3d in tileset.tiles], tileset.rules)
+                         for tileset in self.prop.tilesets}
         # optimized search tileset from tile3d
         self.search_tile3d = {tile3d.tile3d: tileset.tileset
                               for tileset in self.prop.tilesets

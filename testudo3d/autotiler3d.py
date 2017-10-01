@@ -94,18 +94,16 @@ class AutoTiler3D(Tilemap3D):
 
     def init_rules(self):
         self.rulesets = {}
-        for scene in self.tilesets.values():
-            if not scene.rules:
-                self.error('Tileset "{}" has no ruleset'.format(scene.name))
-                self.on_quit()
-                return
-            text = bpy.data.texts[scene.rules]
+        for name, tileset in self.tilesets.items():
+            if not tileset.rules:
+                # self.error('Tileset "{}" has no ruleset'.format(name))
+                raise Exception('Tileset "{}" has no ruleset'.format(name))
+            text = bpy.data.texts[tileset.rules]
             try:
-                self.rulesets[scene.name] = parse_rules(text) # note: monkey patching
+                self.rulesets[name] = parse_rules(text)
             except ValueError as e:
-                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(scene.rules, e.line_no, e.line))
-                self.on_quit()
-                return
+                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.rules, e.line_no, e.line))
+                raise e
 
     def refresh_tilesets(self):
         Tilemap3D.refresh_tilesets(self)
