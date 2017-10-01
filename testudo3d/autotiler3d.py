@@ -26,12 +26,12 @@ class Ruleset:
         # else None
 
 class Rule:
-    def __init__(self, tile3d, rot=0):
-        self.tile3d = tile3d
+    def __init__(self, tiles, rot=0):
+        self.tiles = tiles
         self.rot = rot
 
     def __str__(self):
-        return '{} {}'.format(self.tile3d, self.rot)
+        return '{} {}'.format(self.tiles, self.rot)
 
 def parse_rules(text):
     ROTATE = {
@@ -51,7 +51,6 @@ def parse_rules(text):
         a = split[0]
         b = split[1:]
         if not b: continue # none or default
-        b = b[0] # only one supported
         try:
             n = int(a, 2)
             rules[n] = Rule(b)
@@ -133,10 +132,10 @@ class AutoTiler3D(Tilemap3D):
         Tilemap3D.paste(self)
         self.alt = True
 
-    def end_grab(self):
+    def end_grab(self, cancel=False):
         # no auto-tiling
         self.alt = False
-        Tilemap3D.end_grab(self)
+        Tilemap3D.end_grab(self, cancel)
         self.alt = True
 
     def get_occupied(self):
@@ -166,7 +165,8 @@ class AutoTiler3D(Tilemap3D):
         rule = ruleset.get(bitmask)
 
         if rule:
-            tile3d = self.create_tile(rule.tile3d)
+            group = choice(rule.tiles)
+            tile3d = self.create_tile(group)
             tile3d.rot = radians(rule.rot)
 
     def batch_cdraw(self, points):
@@ -241,7 +241,8 @@ class AutoTiler3D(Tilemap3D):
             self.delete_tile(center[0])
 
         if rule:
-            tile3d = self.create_tile(rule.tile3d)
+            group = choice(rule.tiles)
+            tile3d = self.create_tile(group)
             tile3d.rot = radians(rule.rot)
 
     def auto_tiling(self):
@@ -258,5 +259,6 @@ class AutoTiler3D(Tilemap3D):
         self.delete_tile(center[0])
 
         if rule:
-            tile3d = self.create_tile(rule.tile3d)
+            group = choice(rule.tiles)
+            tile3d = self.create_tile(group)
             tile3d.rot = radians(rule.rot)

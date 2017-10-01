@@ -40,7 +40,8 @@ from bpy.props import (
     FloatProperty,
     EnumProperty,
     PointerProperty,
-    CollectionProperty
+    CollectionProperty,
+    IntVectorProperty
 )
 from bpy.types import (
     Panel,
@@ -49,6 +50,7 @@ from bpy.types import (
     Header,
     UIList
 )
+from mathutils import Vector
 
 from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase
 from .turtle3d import Turtle3D
@@ -133,6 +135,22 @@ class T3DProperties(PropertyGroup):
         name='Outline',
         description='Use outline brush',
         default=False
+    )
+
+    def get_cursor_pos(self):
+        if T3DOperatorBase.running_modal:
+            vec = t3d.cursor.pos.copy()
+            round_vector(vec)
+            return vec
+        return (0,0,0)
+    def set_cursor_pos(self, value):
+        t3d.cursor.pos = Vector(value)
+        t3d.construct_select_cube()
+
+    cursor_pos = IntVectorProperty(
+        name='Cursor Pos',
+        get=get_cursor_pos,
+        set=set_cursor_pos
     )
 
     tile_previews_ = IntProperty(default=-1)
@@ -305,7 +323,6 @@ class T3DToolsPanel(Panel):
 
         layout.operator(ManualModeOperator.bl_idname)
         layout.operator(AutoModeOperator.bl_idname)
-        layout.prop(prop, 'user_layer')
 
         col = layout.column()
         col.enabled = T3DOperatorBase.running_modal and t3d.manual_mode
@@ -336,11 +353,15 @@ class T3DDrawingPanel(Panel):
         prop = context.scene.t3d_prop
 
         self.display_selected_tile3d(context)
-        layout.operator(SetActiveTile3D.bl_idname)
-        layout.operator(CursorToSelected.bl_idname)
-        layout.operator(Goto3DCursor.bl_idname)
+
         col = layout.column()
         col.enabled = T3DOperatorBase.running_modal
+        col.prop(prop, 'user_layer')
+        row = col.row()
+        row.prop(prop, 'cursor_pos', text='')
+        col.operator(SetActiveTile3D.bl_idname)
+        col.operator(CursorToSelected.bl_idname)
+        col.operator(Goto3DCursor.bl_idname)
         col.prop(prop, 'down')
         col.prop(prop, 'outline')
         col.prop(prop, 'brush_size')

@@ -167,8 +167,8 @@ class Tile3DFinder:
         size = len(self.objects)
         self.kd = KDTree(size)
 
-        for i, child in enumerate(self.objects):
-            self.kd.insert(child.pos, i)
+        for i, obj in enumerate(self.objects):
+            self.kd.insert(obj.pos, i)
         self.kd.balance()
 
     def get_tiles_at(self, pos):
@@ -498,6 +498,13 @@ class Tilemap3D:
         cube_max = Vector((max(start.x, end.x), max(start.y, end.y), max(start.z, end.z)))
         return cube_min, cube_max
 
+    def select_cube_dim(self):
+        cube_min, cube_max = self.select_cube_bounds()
+        w = int(round(abs(cube_max.x + 1 - cube_min.x)))
+        d = int(round(abs(cube_max.y + 1 - cube_min.y)))
+        h = int(round(abs(cube_max.z + 1 - cube_min.z)))
+        return w, d, h
+
     def batch_cdraw(self, points):
         self.do_points(points, self.cdraw)
 
@@ -548,14 +555,14 @@ def circle_points(radius, x0, y0, z):
     points = []
     while x >= y:
         points += [
-            Vector((x0 + x, y0 + y, z)),
-            Vector((x0 + y, y0 + x, z)),
-            Vector((x0 - y, y0 + x, z)),
-            Vector((x0 - x, y0 + y, z)),
-            Vector((x0 - x, y0 - y, z)),
-            Vector((x0 - y, y0 - x, z)),
-            Vector((x0 + y, y0 - x, z)),
-            Vector((x0 + x, y0 - y, z))
+            Vector((x0 + x, y0 + y, z)).freeze(),
+            Vector((x0 + y, y0 + x, z)).freeze(),
+            Vector((x0 - y, y0 + x, z)).freeze(),
+            Vector((x0 - x, y0 + y, z)).freeze(),
+            Vector((x0 - x, y0 - y, z)).freeze(),
+            Vector((x0 - y, y0 - x, z)).freeze(),
+            Vector((x0 + y, y0 - x, z)).freeze(),
+            Vector((x0 + x, y0 - y, z)).freeze()
         ]
 
         y += 1
@@ -564,6 +571,7 @@ def circle_points(radius, x0, y0, z):
         if err > 0:
             x -= 1
             err -= 2 * x + 1
+    points = list(set(points)) # remove duplicates...
     return points
 
 def plot4(cx, cy, x, y, z):

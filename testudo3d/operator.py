@@ -491,6 +491,11 @@ class T3DOperatorBase:
         vec3_str = "{}, {}, {}".format(int(self.cursor.pos.x), int(self.cursor.pos.y), int(self.cursor.pos.z))
         draw_text_2d("cursor pos: " + vec3_str, size=15, color=GREY)
 
+        if self.state.select:
+            w, d, h = self.select_cube_dim()
+            text = "{}, {}, {}".format(w, d, h)
+            draw_text_2d('select dim: ' + text, size=15, color=GREY)
+
         restore_gl_defaults()
 
 class ManualModeOperator(Tilemap3D, T3DOperatorBase, Operator):
@@ -560,10 +565,11 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
         for name, value in self.rulesets.items():
             notfound = []
             for rule in value.rules.values():
-                if rule.tile3d not in tiles and rule.tile3d not in notfound:
-                    notfound.append(rule.tile3d)
-            for tile3d in notfound:
-                self.report({'WARNING'}, 'Tile "{}" not found in blend (did you link your tiles?)'.format(tile3d))
+                for tile3d in rule.tiles:
+                    if tile3d not in tiles and tile3d not in notfound:
+                        notfound.append(tile3d)
+                for tile3d in notfound:
+                    self.report({'WARNING'}, 'Tile "{}" not found in blend (did you link your tiles?)'.format(tile3d))
 
     def on_quit(self):
         AutoTiler3D.on_quit(self)
