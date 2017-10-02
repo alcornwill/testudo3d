@@ -13,7 +13,7 @@ class T3DTest:
     save_blend = False
 
     def run_in_blender(self):
-        # invokes blender from command line, with itself as parameter!
+        # invokes blender from command line, with itself as parameter
         call(COMMAND.format(self.name), shell=True)
 
     def run(self):
@@ -24,10 +24,8 @@ class T3DTest:
 
     def test_init(self):
         import logging
-        # from testudo3d import AutoTiler3D
-        # t3d = AutoTiler3D(logging_level=logging.DEBUG)
-        from testudo3d import Turtle3D
-        t3d = Turtle3D(logging_level=logging.DEBUG)
+        from testudo3d.turtle3d import ManualTurtle3D
+        self.turtle = ManualTurtle3D(logging_level=logging.DEBUG)
         t3d.init()
 
     def execute(self):
@@ -46,97 +44,100 @@ class CircleTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        t3d.cursor.tile3d = 'Suzanne'
-        t3d.circfill(8)
+        turtle = self.turtle
+        turtle.settile('Suzanne')
+        turtle.down()
+        turtle.circfill(8)
 
 class CombinedTest(T3DTest):
     name = "combined_test"
     save_blend = True
 
     def execute(self):
-        t3d.cursor.tile3d = 'Suzanne'
+        turtle = self.turtle
+        turtle.settile('Suzanne')
         # test all features
         # features: paint, delete, copy/paste, grab, fill region, clear region, copy/paste region, grab region
 
         # paint
-        t3d.translate(0, 1, 0)
-        t3d.paint()
-        t3d.translate(0, -1, 0)
+        turtle.translate(0, 1, 0)
+        turtle.paint()
+        turtle.translate(0, -1, 0)
 
         # copy/paste
-        t3d.translate(2, 0, 0)
-        t3d.paint()
-        t3d.copy()
-        t3d.delete()
-        t3d.translate(0, 2, 0)
-        t3d.paste()
-        t3d.translate(0, -2, 0)
+        turtle.translate(2, 0, 0)
+        turtle.paint()
+        turtle.copy()
+        turtle.delete()
+        turtle.translate(0, 2, 0)
+        turtle.paste()
+        turtle.translate(0, -2, 0)
 
         # grab
-        t3d.translate(2, 0, 0)
-        t3d.paint()
-        t3d.start_grab()
-        t3d.translate(0, 2, 0)
-        t3d.rotate(90)
-        t3d.end_grab()
-        t3d.rotate(-90)
-        t3d.translate(0, -2, 0)
+        turtle.translate(2, 0, 0)
+        turtle.paint()
+        turtle.start_grab()
+        turtle.translate(0, 2, 0)
+        turtle.rotate(90)
+        turtle.end_grab()
+        turtle.rotate(-90)
+        turtle.translate(0, -2, 0)
 
         # fill region
-        t3d.translate(2, 0, 0)
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.fill()
-        t3d.translate(0, -2, 0)
+        turtle.translate(2, 0, 0)
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.fill()
+        turtle.translate(0, -2, 0)
 
         # clear region
-        t3d.translate(2, 0, 0)
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.fill()
-        t3d.translate(0, -2, 0)
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.clear()
-        t3d.translate(0, -2, 0)
+        turtle.translate(2, 0, 0)
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.fill()
+        turtle.translate(0, -2, 0)
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.clear()
+        turtle.translate(0, -2, 0)
 
         # copy/paste region
-        t3d.translate(2, 0, 0)
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.fill()
-        t3d.start_select()
-        t3d.translate(0, -2, 0)
-        t3d.copy()
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.clear()
-        t3d.translate(0, 2, 0)
-        t3d.rotate(90)
-        t3d.paste()
-        t3d.rotate(-90)
-        t3d.translate(0, -4, 0)
+        turtle.translate(2, 0, 0)
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.fill()
+        turtle.start_select()
+        turtle.translate(0, -2, 0)
+        turtle.copy()
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.clear()
+        turtle.translate(0, 2, 0)
+        turtle.rotate(90)
+        turtle.paste()
+        turtle.rotate(-90)
+        turtle.translate(0, -4, 0)
 
         # grab region
-        t3d.translate(3, 0, 0)
-        t3d.start_select()
-        t3d.translate(0, 2, 0)
-        t3d.fill()
-        t3d.start_select()
-        t3d.translate(0, -2, 0)
-        t3d.start_grab()
-        t3d.translate(0, 2, 0)
-        t3d.rotate(90)
-        t3d.end_grab()
-        t3d.rotate(-90)
-        t3d.translate(0, -2, 0)
+        turtle.translate(3, 0, 0)
+        turtle.start_select()
+        turtle.translate(0, 2, 0)
+        turtle.fill()
+        turtle.start_select()
+        turtle.translate(0, -2, 0)
+        turtle.start_grab()
+        turtle.translate(0, 2, 0)
+        turtle.rotate(90)
+        turtle.end_grab()
+        turtle.rotate(-90)
+        turtle.translate(0, -2, 0)
 
 class TurtleTest(T3DTest):
     name = "turtle_test"
     save_blend = True
 
     def execute(self):
-        t3d.cursor.tile3d = 'Suzanne'
+        self.turtle.settile('Suzanne')
 
         # Weed-1
         self.lsys(
@@ -166,19 +167,20 @@ class TurtleTest(T3DTest):
         # )
 
     def lsys(self, depth, rules, angle, length, axiom):
+        turtle = self.turtle
         # l-system
         # The Computational Beauty of Nature, Gary William Flake, p76-92
         stack = []
         def right():
-            t3d.right(angle)
+            turtle.right(angle)
         def left():
-            t3d.left(angle)
+            turtle.left(angle)
         def forward():
-            t3d.forward(length)
+            turtle.forward(length)
         def go():
-            t3d.up()
-            t3d.forward(length)
-            t3d.down()
+            turtle.up()
+            turtle.forward(length)
+            turtle.down()
         def push():
             stack.append(t3d.cursor.copy())
         def pop():
@@ -189,7 +191,7 @@ class TurtleTest(T3DTest):
         commands = {"-": right, "+": left, "f": forward, 'g': go,'[': push, ']': pop}
         axiom = self.replace(axiom, rules, depth)
 
-        t3d.down()
+        turtle.down()
         self.draw(axiom, commands)
 
     def replace_(self, seq, rules):
@@ -212,32 +214,32 @@ class CellularAutomataTest(T3DTest):
     save_blend = True
 
     def execute(self):
-        from testudo3d.tilemap3d import Tile3DFinder, any
-        from mathutils import Vector
+        # one dimensional CA
         rule = 126
         width = 32
         time = 32
 
         hw = int(width/2)
 
-        t3d.cursor.tile3d = 'Suzanne'
-        t3d.paint()
-        t3d.translate(-1, 0, 0)
-        t3d.paint()
+        turtle = self.turtle
+        turtle.settile('Suzanne')
+        turtle.paint()
+        turtle.translate(-1, 0, 0)
+        turtle.paint()
         for t in range(time):
-            finder = Tile3DFinder()
             for x in range(-hw, hw, 1):
-                a = finder.get_tiles_at(Vector((x-1, t, 0)))
-                b = finder.get_tiles_at(Vector((x  , t, 0)))
-                c = finder.get_tiles_at(Vector((x+1, t, 0)))
-                a = any(a)
-                b = any(b)
-                c = any(c)
+                turtle.goto(x-1, t)
+                a = turtle.isoccupied()
+                turtle.goto(x, t)
+                b = turtle.isoccupied()
+                turtle.goto(x+1, t)
+                c = turtle.isoccupied()
+
                 value = a << 2 | b << 1 | c
                 result = rule >> value & 1
                 if result:
-                    t3d.cursor.pos = Vector((x, t+1, 0))
-                    t3d.paint()
+                    turtle.goto(x, t+1)
+                    turtle.paint()
 
 def get_tests():
     global tests

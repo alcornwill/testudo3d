@@ -228,8 +228,8 @@ class Tilemap3D:
         self.tilesets = None
 
         # init
-        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
-        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.WARNING)
+        logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging_level)
+        # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.WARNING)
         # logging.basicConfig(format='T3D: %(levelname)s: %(message)s', level=logging.DEBUG)
         builtins.t3d = self # note: builtin abuse
         bpy.types.Scene.t3d = self
@@ -539,10 +539,10 @@ class Tilemap3D:
         self._goto(x0,y0)
 
     def circfill(self, radius):
-        cx, cy, z = self.cursor.pos
-        points = circfill_points(cx, cy, radius, z)
+        x, y, z = self.cursor.pos
+        points = circfill_points(x, y, radius, z)
         self.batch_cdraw(points)
-        self._goto(cx, cy)
+        self._goto(x, y)
 
     def line(self, x2, y2):
         x1, y1, z = self.cursor.pos
