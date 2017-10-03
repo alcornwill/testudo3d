@@ -226,8 +226,8 @@ class T3DOperatorBase:
             KeyInput('LEFT_BRACKET', 'PRESS', self.handle_dec_brush_size),
         ]
 
-    def __del__(self):
-        self.on_quit()
+    # def __del__(self):
+    #     self.on_quit()
 
     def on_quit(self):
         if not T3DOperatorBase.running_modal: return
@@ -536,6 +536,7 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
             tileset = prop.tilesets[prop.tileset_idx]
         except IndexError:
             return False
+        if not tileset.rules: return False
         return T3DOperatorBase.poll(context)
 
     def __init__(self):

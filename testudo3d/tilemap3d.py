@@ -243,13 +243,12 @@ class Tilemap3D:
     tileset = property(get_tileset)
 
     def init(self):
-        self.init_root_obj()
-
         subscribe('set_tile3d', self.set_tile3d)
         subscribe('refresh_tilesets', self.refresh_tilesets)
 
         self.prop.tileset_idx = self.prop.tileset_idx # give it a kick
         self.prop.refresh_tilesets()
+        self.init_root_obj()
 
     def set_tile3d(self, tile3d):
         self.cursor.tile3d = tile3d
@@ -275,6 +274,9 @@ class Tilemap3D:
             self.cursor = Cursor.deserialize(self.root[CUSTOM_PROP_LAST_CURSOR])
             if self.cursor.tile3d not in bpy.data.groups:
                 self.cursor.tile3d = None
+            if self.cursor.tile3d:
+                self.prop.tile_previews = self.cursor.tile3d
+                self.prop.tileset = self.get_tileset_from_group(self.cursor.tile3d)
         self.lastpos = self.cursor.pos
         logging.debug("initialized root obj")
 

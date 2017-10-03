@@ -95,9 +95,6 @@ class AutoTiler3D(Tilemap3D):
     def init_rules(self):
         self.rulesets = {}
         for name, tileset in self.tilesets.items():
-            if not tileset.rules:
-                # self.error('Tileset "{}" has no ruleset'.format(name))
-                raise Exception('Tileset "{}" has no ruleset'.format(name))
             text = bpy.data.texts[tileset.rules]
             try:
                 self.rulesets[name] = parse_rules(text)

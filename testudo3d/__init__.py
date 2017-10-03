@@ -173,8 +173,8 @@ class T3DProperties(PropertyGroup):
         tilesets = {tileset.tileset: tileset for tileset in self.tilesets}
         for tileset in self.tilesets:
             tileset.tiles.clear()
-        for scene in bpy.data.scenes:
-            for obj in scene.objects:
+        for group in bpy.data.groups:
+            for obj in group.objects:
                 if CUSTOM_PROP_TILESET in obj:
                     name = obj[CUSTOM_PROP_TILESET]
                     if name not in tilesets:
@@ -218,10 +218,28 @@ class T3DProperties(PropertyGroup):
     def get_tileset(self):
         if self.tilesets:
             return self.tilesets[self.tileset_idx]
-    tileset = property(get_tileset)
+    def set_tileset(self, value):
+        for i, tileset in enumerate(self.tilesets):
+            if tileset.tileset == value:
+                self.tileset_idx = i
+                return
+    tileset = property(get_tileset, set_tileset)
+
+    tileset_idx_ = IntProperty()
+    def get_tileset_idx(self):
+        return self.tileset_idx_
+    def set_tileset_idx(self, value):
+        if T3DOperatorBase.running_modal and not t3d.manual_mode:
+            tileset = self.tilesets[value]
+            if not tileset.rules:
+                # if in auto-mode, don't let set index to tileset that doesn't have rules
+                return
+        self.tileset_idx_ = value
 
     tileset_idx = IntProperty(
-        default=0
+        default=0,
+        get=get_tileset_idx,
+        set=set_tileset_idx
     )
 
     roomgen_name = StringProperty(
@@ -344,13 +362,12 @@ class T3DDrawingPanel(Panel):
         layout = self.layout
         prop = context.scene.t3d_prop
 
-        self.display_selected_tile3d(context)
-
         col = layout.column()
         col.enabled = T3DOperatorBase.running_modal
         col.prop(prop, 'user_layer')
         row = col.row()
         row.prop(prop, 'cursor_pos', text='')
+        self.display_selected_tile3d(context)
         col.operator(SetActiveTile3D.bl_idname)
         col.operator(CursorToSelected.bl_idname)
         col.operator(Goto3DCursor.bl_idname)
@@ -385,35 +402,13 @@ class T3DUtilsPanel(Panel):
         col.prop(prop, 'tileset_name', text='')
         layout.operator(ClearTilesetOperator.bl_idname)
         layout.operator(T3DSetupTilesOperator.bl_idname)
+        layout.separator()
         col = layout.column(align=True)
         col.operator(RoomGenOperator.bl_idname)
         col.prop(prop, 'roomgen_name', text='')
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
-        layout.operator(ConnectRoots.bl_idname)
         # layout.operator(XmlExportOperator.bl_idname)
-
-class ConnectRoots(Operator):
-    bl_idname = "view3d.connect_roots"
-    bl_label = "Connect Roots"
-    bl_description = "Connect two roots with constraints utility"
-
-    @classmethod
-    def poll(self, context):
-        return context.mode == "OBJECT" and len(context.selected_objects) == 2
-
-    def execute(self, context):
-        selected = list(context.selected_objects)
-        obj1 = context.scene.objects.active
-        selected.remove(obj1)
-        obj2 = selected[0]
-        childof = obj2.constraints.new('CHILD_OF')
-        childof.target = obj1
-        childof.inverse_matrix = obj1.matrix_world.inverted()
-        obj2.update_tag({'OBJECT'})
-        context.scene.update()
-        self.report({'INFO'}, 'roots connected')
-        return {'FINISHED'}
 
 class LinkTile3DLibrary(Operator):
     """Link all groups from linked library"""
@@ -422,12 +417,12 @@ class LinkTile3DLibrary(Operator):
 
     def execute(self, context):
         t3d = context.scene.t3d_prop
-        with bpy.data.libraries.load(t3d.tile3d_library_path, link=True) as (data_src, data_dst):
+        path = t3d.tile3d_library_path
+        if not path: return {'FINISHED'}
+        with bpy.data.libraries.load(path, link=True) as (data_src, data_dst):
             # link groups
             data_dst.groups = data_src.groups
             self.report({'INFO'}, 'linked {} groups'.format(len(data_src.groups)))
-            # link scenes
-            data_dst.scenes = data_src.scenes
             # link texts
             data_dst.texts = data_src.texts
         return {'FINISHED'}
@@ -438,6 +433,7 @@ class SetActiveTile3D(Operator):
     bl_label = "Set Active Tile3D"
 
     tile3d = None
+    tileset = None
 
     @classmethod
     def poll(cls, context):
@@ -447,13 +443,20 @@ class SetActiveTile3D(Operator):
         if not obj: return False
         group = obj.group
         if not group:
-            # else might be the linked object
+            # else might be the source object
             group = get_first_group_name(obj)
+            if not group: return False
+        tileset = t3d.get_tileset_from_group(group)
+        if not tileset: return False
         SetActiveTile3D.tile3d = group
+        SetActiveTile3D.tileset = tileset
         return True
 
     def execute(self, context):
         t3d.cursor.tile3d = self.tile3d
+        prop = context.scene.t3d_prop
+        prop.tile_previews = self.tile3d
+        prop.tileset = self.tileset
         update_3dviews()
         return {'FINISHED'}
 
@@ -487,6 +490,7 @@ class Goto3DCursor(Operator):
         round_vector(pos)
         t3d.line(pos.x, pos.y)
         t3d.construct_select_cube()
+        bpy.ops.ed.undo_push()
         return {'FINISHED'}
 
 class AlignTiles(Operator):
@@ -521,7 +525,7 @@ class T3DSetupTilesOperator(Operator):
 
     @classmethod
     def poll(self, context):
-        return context.mode == "OBJECT"
+        return context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
         self.setup_tiles(context)
@@ -587,6 +591,10 @@ class RoomGenOperator(Operator):
         0b0111,
         0b1111
     )
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
         name = context.scene.t3d_prop.roomgen_name
@@ -669,11 +677,14 @@ class SetTilesetOperator(Operator):
 
     @classmethod
     def poll(cls, context):
-        return not T3DOperatorBase.running_modal
+        return context.selected_objects and context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
         prop = context.scene.t3d_prop
         tileset = prop.tileset_name
+        if not tileset:
+            self.report({'WARNING'}, "invalid tileset name ''")
+            return {'FINISHED'}
         objects = [obj for obj in context.selected_objects if not obj.parent] # only top-level
         for obj in objects:
             obj[CUSTOM_PROP_TILESET] = tileset
@@ -687,7 +698,7 @@ class ClearTilesetOperator(Operator):
 
     @classmethod
     def poll(cls, context):
-        return not T3DOperatorBase.running_modal
+        return context.selected_objects and context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
         objects = context.selected_objects
@@ -704,7 +715,7 @@ class MakeTilesRealOperator(Operator):
 
     @classmethod
     def poll(cls, context):
-        return not T3DOperatorBase.running_modal
+        return context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
         tiles = [obj for obj in context.selected_objects if obj.dupli_group]
