@@ -14,4 +14,4 @@ unique features:
 * 'make tiles real' to make unique changes to each tile to further break repetition
 * implements [turtle graphics](https://en.wikipedia.org/wiki/Turtle_graphics)! (hence the name)
 
-see the [documentation](wiki.md) for more info
+see wiki.pdf for more info

@@ -25,7 +25,7 @@ bl_info = {
     "location": "3D View > Tools > T3D",
     "description": "create 3D tilemaps",
     "warning": "",
-    "wiki_url": "https://github.com/alcornwill/testudo3d",
+    "wiki_url": "",
     "category": "3D View",
 }
 
@@ -110,6 +110,8 @@ class TilesetPropertyGroup(PropertyGroup):
         type=TilePropertyGroup
     )
     rules = StringProperty(name='Rules')
+    last_idx = IntProperty(default=-1)
+    last_tile = StringProperty()
 
 def enum_previews(self, context):
     prop = bpy.context.scene.t3d_prop
@@ -174,17 +176,20 @@ class T3DProperties(PropertyGroup):
         for tileset in self.tilesets:
             tileset.tiles.clear()
         for group in bpy.data.groups:
-            for obj in group.objects:
-                if CUSTOM_PROP_TILESET in obj:
-                    name = obj[CUSTOM_PROP_TILESET]
-                    if name not in tilesets:
-                        tileset = self.tilesets.add()
-                        tileset.tileset = name
-                        tilesets[name] = tileset
-                    else:
-                        tileset = tilesets[name]
-                    tile3d = tileset.tiles.add()
-                    tile3d.tile3d = obj.name
+            try:
+                obj = group.objects[group.name]
+                name = obj[CUSTOM_PROP_TILESET]
+                if name not in tilesets:
+                    tileset = self.tilesets.add()
+                    tileset.tileset = name
+                    tilesets[name] = tileset
+                else:
+                    tileset = tilesets[name]
+                tile3d = tileset.tiles.add()
+                tile3d.tile3d = obj.name
+            except KeyError:
+                # not a tile
+                pass
         for i, tileset in enumerate(self.tilesets):
             if not tileset.tiles:
                 self.tilesets.remove(i)
@@ -234,7 +239,24 @@ class T3DProperties(PropertyGroup):
             if not tileset.rules:
                 # if in auto-mode, don't let set index to tileset that doesn't have rules
                 return
+        if T3DOperatorBase.running_modal and t3d.manual_mode:
+            tileset = self.tileset
+            tileset.last_tile = self.tile_previews
+
         self.tileset_idx_ = value
+        self.refresh_enum_items()
+
+        if T3DOperatorBase.running_modal and t3d.manual_mode:
+            tileset = self.tileset
+            if tileset.last_tile:
+                try:
+                    self.tile_previews = tileset.last_tile
+                except TypeError:
+                    tile3d = self.enum_items[0][0]
+                    self.tile_previews = tile3d
+            else:
+                tile3d = self.enum_items[0][0]
+                self.tile_previews = tile3d
 
     tileset_idx = IntProperty(
         default=0,
@@ -367,7 +389,7 @@ class T3DDrawingPanel(Panel):
         col.prop(prop, 'user_layer')
         row = col.row()
         row.prop(prop, 'cursor_pos', text='')
-        self.display_selected_tile3d(context)
+        self.display_selected_tile3d(col, context)
         col.operator(SetActiveTile3D.bl_idname)
         col.operator(CursorToSelected.bl_idname)
         col.operator(Goto3DCursor.bl_idname)
@@ -375,10 +397,10 @@ class T3DDrawingPanel(Panel):
         col.prop(prop, 'outline')
         col.prop(prop, 'brush_size')
 
-    def display_selected_tile3d(self, context):
+    def display_selected_tile3d(self, layout, context):
         obj = context.object
         text = obj.group if obj else 'None'
-        self.layout.label("selected: {}".format(text))
+        layout.label("selected: {}".format(text))
 
 class T3DUtilsPanel(Panel):
     bl_idname = "view3d.t3d_utils_panel"
@@ -397,6 +419,7 @@ class T3DUtilsPanel(Panel):
         sub.scale_x = 3.0
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
+        self.display_selected_tileset(layout, context)
         col = layout.column(align=True)
         col.operator(SetTilesetOperator.bl_idname)
         col.prop(prop, 'tileset_name', text='')
@@ -409,6 +432,11 @@ class T3DUtilsPanel(Panel):
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         # layout.operator(XmlExportOperator.bl_idname)
+
+    def display_selected_tileset(self, layout, context):
+        obj = context.object
+        text = obj[CUSTOM_PROP_TILESET] if obj and CUSTOM_PROP_TILESET in obj else 'None'
+        layout.label("selected: {}".format(text))
 
 class LinkTile3DLibrary(Operator):
     """Link all groups from linked library"""
@@ -455,8 +483,8 @@ class SetActiveTile3D(Operator):
     def execute(self, context):
         t3d.cursor.tile3d = self.tile3d
         prop = context.scene.t3d_prop
-        prop.tile_previews = self.tile3d
         prop.tileset = self.tileset
+        prop.tile_previews = self.tile3d
         update_3dviews()
         return {'FINISHED'}
 
@@ -688,7 +716,7 @@ class SetTilesetOperator(Operator):
         objects = [obj for obj in context.selected_objects if not obj.parent] # only top-level
         for obj in objects:
             obj[CUSTOM_PROP_TILESET] = tileset
-        self.report({'INFO'}, "{} objects changed".format(len(objects)))
+        self.report({'INFO'}, '{} objects added to tileset "{}"'.format(len(objects), tileset))
         return {'FINISHED'}
 
 class ClearTilesetOperator(Operator):
@@ -705,7 +733,7 @@ class ClearTilesetOperator(Operator):
         for obj in objects:
             if CUSTOM_PROP_TILESET in obj:
                 del obj[CUSTOM_PROP_TILESET]
-        self.report({'INFO'}, "{} objects changed".format(len(objects)))
+        self.report({'INFO'}, "removed tileset from {} objects".format(len(objects)))
         return {'FINISHED'}
 
 class MakeTilesRealOperator(Operator):

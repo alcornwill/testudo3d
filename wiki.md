@@ -105,7 +105,8 @@ a **Tile** is just a [group instance](http://blender-manual-i18n.readthedocs.io/
 However, you should not create groups yourself, as **Setup 3D Tiles** will do this automatically.  
 
 To create a tile:
-* Create a top-level object in the scene. The object can have any number of children.
+* Create a top-level object in the scene. The object can have any number of children.  
+The __object origin__ should be at the bottom of the tile (see sample blends for examples)
 * press **Setup 3D Tiles**.  
 This will add the tile and it's children to a **group** of the same name, so it can be [duplicated](https://docs.blender.org/manual/en/dev/editors/3dview/object/properties/duplication/dupligroup.html).  
 It will also layout your tiles nicely

@@ -275,8 +275,8 @@ class Tilemap3D:
             if self.cursor.tile3d not in bpy.data.groups:
                 self.cursor.tile3d = None
             if self.cursor.tile3d:
-                self.prop.tile_previews = self.cursor.tile3d
                 self.prop.tileset = self.get_tileset_from_group(self.cursor.tile3d)
+                self.prop.tile_previews = self.cursor.tile3d
         self.lastpos = self.cursor.pos
         logging.debug("initialized root obj")
 
