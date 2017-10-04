@@ -6,12 +6,12 @@ import random
 from math import floor, degrees, radians, atan2, sqrt, isclose
 from mathutils import Vector, Quaternion, Euler, Matrix
 from mathutils.kdtree import KDTree
+from bpy.props import StringProperty
 from .events import subscribe, unsubscribe, send_event
 
 TOLERANCE = 0.01
 CUSTOM_PROP_TILE_SIZE_Z = "t3d_tile_size_z"
 CUSTOM_PROP_LAST_CURSOR = 't3d_last_cursor'
-CUSTOM_PROP_TILESET = 't3d_tileset'
 ADJACENCY_VECTORS = (
     # DUWSEN
     Vector((0, 1, 0)),
@@ -86,6 +86,10 @@ def get_first_group_name(obj):
     if len(obj.users_group) > 0:
         return obj.users_group[0].name
 
+def get_tileset_from_group(group_name):
+    src = bpy.data.objects[group_name]
+    return src.tileset
+
 def init_object_props():
     def get_pos(self):
         vec = self.location.copy()
@@ -109,13 +113,31 @@ def init_object_props():
 
     def get_tileset(self):
         if self.dupli_group:
-            return t3d.get_tileset_from_group(self.dupli_group.name)
+            return get_tileset_from_group(self.dupli_group.name)
+
+    def is_src_tile(self):
+        name = self.name
+        if name not in bpy.data.groups: return False
+        group = bpy.data.groups[name]
+        if name not in group.objects: return False
+        if not self.tileset: return False
+        return True
+
+    def is_tile(self):
+        if not self.dupli_group: return False
+        name = self.dupli_group.name
+        if name not in self.dupli_group.objects: return False
+        src = self.dupli_group.objects[name]
+        if not src.tileset: return False
+        return True
 
     # NOTE: these attribute names may conflict with other addons
     bpy.types.Object.pos = property(get_pos, set_pos)
     bpy.types.Object.rot = property(get_rot, set_rot)
     bpy.types.Object.group = property(get_group)
-    bpy.types.Object.tileset = property(get_tileset)
+    bpy.types.Object.src_tileset = property(get_tileset)
+    bpy.types.Object.tileset = StringProperty(name='Tileset')
+    bpy.types.Object.is_src_tile = property(is_src_tile)
 
 class Cursor:
     def __init__(self, tile3d=None, pos=None, rot=0):
@@ -132,8 +154,7 @@ class Cursor:
         return Cursor(self.tile3d, self.pos.copy(), self.rot)
 
     def serialize(self):
-        return "{tile3d},{x},{y},{z},{rot}".format(
-            tile3d=self.tile3d,
+        return "{x},{y},{z},{rot}".format(
             x=self.pos.x,
             y=self.pos.y,
             z=self.pos.z,
@@ -142,12 +163,16 @@ class Cursor:
 
     @staticmethod
     def deserialize(str):
-        tile3d, x, y, z, rot = str.split(',')
-        x = float(x)
-        y = float(y)
-        z = float(z)
-        rot = float(rot)
-        return Cursor(tile3d, Vector((x, y, z)), rot)
+        try:
+            x, y, z, rot = str.split(',')
+            x = float(x)
+            y = float(y)
+            z = float(z)
+            rot = float(rot)
+            cursor = Cursor(None, Vector((x, y, z)), rot)
+        except:
+            cursor = Cursor()
+        return cursor
 
 class GrabData:
     def __init__(self, tile3d):
@@ -246,8 +271,8 @@ class Tilemap3D:
         subscribe('set_tile3d', self.set_tile3d)
         subscribe('refresh_tilesets', self.refresh_tilesets)
 
-        self.prop.tileset_idx = self.prop.tileset_idx # give it a kick
         self.prop.refresh_tilesets()
+        # self.prop.tileset_idx = self.prop.tileset_idx # give it a kick
         self.init_root_obj()
 
     def set_tile3d(self, tile3d):
@@ -256,10 +281,6 @@ class Tilemap3D:
     def refresh_tilesets(self):
         self.tilesets = {tileset.tileset: Tileset([tile3d.tile3d for tile3d in tileset.tiles], tileset.rules)
                          for tileset in self.prop.tilesets}
-        # optimized search tileset from tile3d
-        self.search_tile3d = {tile3d.tile3d: tileset.tileset
-                              for tileset in self.prop.tilesets
-                              for tile3d in tileset.tiles}
 
     def init_root_obj(self):
         self.root = bpy.context.object
@@ -272,11 +293,7 @@ class Tilemap3D:
         self.tilesize_z = self.root[CUSTOM_PROP_TILE_SIZE_Z]  # todo monitor if changed? (get from linked library?)
         if CUSTOM_PROP_LAST_CURSOR in self.root:
             self.cursor = Cursor.deserialize(self.root[CUSTOM_PROP_LAST_CURSOR])
-            if self.cursor.tile3d not in bpy.data.groups:
-                self.cursor.tile3d = None
-            if self.cursor.tile3d:
-                self.prop.tileset = self.get_tileset_from_group(self.cursor.tile3d)
-                self.prop.tile_previews = self.cursor.tile3d
+            self.cursor.tile3d = self.prop.tile_previews
         self.lastpos = self.cursor.pos
         logging.debug("initialized root obj")
 
@@ -290,9 +307,6 @@ class Tilemap3D:
 
     def on_update(self):
         self.finder.invalidate()
-
-    def get_tileset_from_group(self, group_name):
-        return self.search_tile3d[group_name]
 
     def get_layers_array(self):
         lst = [False] * 20

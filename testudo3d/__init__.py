@@ -52,10 +52,10 @@ from bpy.types import (
 )
 from mathutils import Vector
 
-from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, round_vector, roundbase, CUSTOM_PROP_TILESET
+from .tilemap3d import init_object_props, update_3dviews, get_first_group_name, get_tileset_from_group, round_vector, roundbase
 from .turtle3d import Turtle3D
 from .autotiler3d import AutoTiler3D
-from .operator import T3DOperatorBase, ManualModeOperator, AutoModeOperator
+from .operator import T3DOperatorBase, ManualModeOperator, AutoModeOperator, clamp
 from .events import subscribe, unsubscribe, send_event
 
 addon_keymaps = []
@@ -89,6 +89,8 @@ def get_children(obj, children=None):
 class TilesetList(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
+        if T3DOperatorBase.running_modal and not t3d.manual_mode:
+            row.enabled = bool(item.rules)
         row.label(item.tileset)
         # rules = item.tileset.rules
         # row.label("{} | {}".format(item.tileset, rules if rules else "None"))
@@ -110,14 +112,22 @@ class TilesetPropertyGroup(PropertyGroup):
         type=TilePropertyGroup
     )
     rules = StringProperty(name='Rules')
-    last_idx = IntProperty(default=-1)
     last_tile = StringProperty()
 
 def enum_previews(self, context):
-    prop = bpy.context.scene.t3d_prop
-    return prop.enum_items
+    return T3DProperties.enum_items
 
 class T3DProperties(PropertyGroup):
+    # IT'S WEIRD how the state of t3d has become split between this and the operator
+    # however it kind-of makes sense because this data is per-scene
+    # and t3d is always singleton
+    # and this is gui data structures
+    # and t3d is optimized data structures
+    # todo ok this is actually terrible
+    # you can select a tileset in one scene that doesn't exist in modal scene
+    # properties should be on operator, not scene
+    # (but operator doesn't exist until executed...)
+
     tile3d_library_path = StringProperty(
         name="Tile3D Library Path",
         description="Path to your tile3d library .blend file",
@@ -178,21 +188,23 @@ class T3DProperties(PropertyGroup):
         for group in bpy.data.groups:
             try:
                 obj = group.objects[group.name]
-                name = obj[CUSTOM_PROP_TILESET]
-                if name not in tilesets:
-                    tileset = self.tilesets.add()
-                    tileset.tileset = name
-                    tilesets[name] = tileset
-                else:
-                    tileset = tilesets[name]
-                tile3d = tileset.tiles.add()
-                tile3d.tile3d = obj.name
             except KeyError:
-                # not a tile
-                pass
+                continue # not a tile
+            name = obj.tileset
+            if not name: continue # not a tile
+            if name not in tilesets:
+                tileset = self.tilesets.add()
+                tileset.tileset = name
+                tilesets[name] = tileset
+            else:
+                tileset = tilesets[name]
+            tile3d = tileset.tiles.add()
+            tile3d.tile3d = obj.name
+
         for i, tileset in enumerate(self.tilesets):
             if not tileset.tiles:
                 self.tilesets.remove(i)
+        self.tileset_idx = clamp(self.tileset_idx, 0, len(self.tilesets)-1)
         self.refresh_enum_items()
         send_event('refresh_tilesets')
 
@@ -223,9 +235,9 @@ class T3DProperties(PropertyGroup):
     def get_tileset(self):
         if self.tilesets:
             return self.tilesets[self.tileset_idx]
-    def set_tileset(self, value):
+    def set_tileset(self, name):
         for i, tileset in enumerate(self.tilesets):
-            if tileset.tileset == value:
+            if tileset.tileset == name:
                 self.tileset_idx = i
                 return
     tileset = property(get_tileset, set_tileset)
@@ -305,10 +317,6 @@ class T3DProperties(PropertyGroup):
         set=set_down
     )
 
-    tileset_name = StringProperty(
-        name = 'Tileset Name'
-    )
-
 class TilesetActionsOperator(bpy.types.Operator):
     bl_idname = "view3d.t3d_tileset_actions"
     bl_label = "Tileset Actions"
@@ -366,7 +374,7 @@ class T3DToolsPanel(Panel):
         row.template_list('TilesetList', '', prop, 'tilesets', prop, 'tileset_idx', rows=3)
 
         col = row.column(align=True)
-        col.enabled = not T3DOperatorBase.running_modal or t3d.manual_mode
+        col.enabled = not T3DOperatorBase.running_modal
         col.operator(TilesetActionsOperator.bl_idname, icon='FILE_REFRESH', text="").action = 'REFRESH'
         col.separator()
         col.operator(TilesetActionsOperator.bl_idname, icon='TRIA_UP', text="").action = 'UP'
@@ -419,11 +427,6 @@ class T3DUtilsPanel(Panel):
         sub.scale_x = 3.0
         sub.prop(prop, 'tile3d_library_path', text="")
         row.operator(LinkTile3DLibrary.bl_idname)
-        self.display_selected_tileset(layout, context)
-        col = layout.column(align=True)
-        col.operator(SetTilesetOperator.bl_idname)
-        col.prop(prop, 'tileset_name', text='')
-        layout.operator(ClearTilesetOperator.bl_idname)
         layout.operator(T3DSetupTilesOperator.bl_idname)
         layout.separator()
         col = layout.column(align=True)
@@ -433,10 +436,26 @@ class T3DUtilsPanel(Panel):
         layout.operator(AlignTiles.bl_idname)
         # layout.operator(XmlExportOperator.bl_idname)
 
-    def display_selected_tileset(self, layout, context):
+class T3DObjectPanel(Panel):
+    bl_idname = 'OBJECT_PT_t3d_object_panel'
+    bl_label = 'T3D'
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = 'object'
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row()
         obj = context.object
-        text = obj[CUSTOM_PROP_TILESET] if obj and CUSTOM_PROP_TILESET in obj else 'None'
-        layout.label("selected: {}".format(text))
+        row.enabled = self.is_enabled(obj)
+        row.prop(context.object, 'tileset')
+
+    def is_enabled(self, obj):
+        name = obj.name
+        if name not in bpy.data.groups: return False
+        group = bpy.data.groups[name]
+        if name not in group.objects: return False
+        return True
 
 class LinkTile3DLibrary(Operator):
     """Link all groups from linked library"""
@@ -469,22 +488,23 @@ class SetActiveTile3D(Operator):
         if not t3d.manual_mode: return False
         obj = context.object
         if not obj: return False
-        group = obj.group
-        if not group:
-            # else might be the source object
-            group = get_first_group_name(obj)
-            if not group: return False
-        tileset = t3d.get_tileset_from_group(group)
-        if not tileset: return False
-        SetActiveTile3D.tile3d = group
+
+        if obj.is_src_tile:
+            tile3d = obj.name
+            tileset = obj.tileset
+        else:
+            tile3d = obj.group
+            if not tile3d: return False
+            tileset = get_tileset_from_group(tile3d)
+            if not tileset: return False
+        SetActiveTile3D.tile3d = tile3d
         SetActiveTile3D.tileset = tileset
         return True
 
     def execute(self, context):
-        t3d.cursor.tile3d = self.tile3d
-        prop = context.scene.t3d_prop
-        prop.tileset = self.tileset
-        prop.tile_previews = self.tile3d
+        # todo using t3d.prop seems wrong
+        t3d.prop.tileset = self.tileset
+        t3d.prop.tile_previews = self.tile3d
         update_3dviews()
         return {'FINISHED'}
 
@@ -697,44 +717,6 @@ class RoomGenOperator(Operator):
 
         bpy.ops.view3d.t3d_setup_tiles()
         scene.rules = text_name
-
-class SetTilesetOperator(Operator):
-    bl_idname = 'view3d.t3d_set_tileset'
-    bl_label = 'Set Tileset'
-    bl_description = 'Set the Tileset of selected objects'
-
-    @classmethod
-    def poll(cls, context):
-        return context.selected_objects and context.mode == "OBJECT" and not T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        prop = context.scene.t3d_prop
-        tileset = prop.tileset_name
-        if not tileset:
-            self.report({'WARNING'}, "invalid tileset name ''")
-            return {'FINISHED'}
-        objects = [obj for obj in context.selected_objects if not obj.parent] # only top-level
-        for obj in objects:
-            obj[CUSTOM_PROP_TILESET] = tileset
-        self.report({'INFO'}, '{} objects added to tileset "{}"'.format(len(objects), tileset))
-        return {'FINISHED'}
-
-class ClearTilesetOperator(Operator):
-    bl_idname = 'view3d.t3d_clear_tileset'
-    bl_label = 'Clear Tileset'
-    bl_description = 'Clear the Tileset of selected objects'
-
-    @classmethod
-    def poll(cls, context):
-        return context.selected_objects and context.mode == "OBJECT" and not T3DOperatorBase.running_modal
-
-    def execute(self, context):
-        objects = context.selected_objects
-        for obj in objects:
-            if CUSTOM_PROP_TILESET in obj:
-                del obj[CUSTOM_PROP_TILESET]
-        self.report({'INFO'}, "removed tileset from {} objects".format(len(objects)))
-        return {'FINISHED'}
 
 class MakeTilesRealOperator(Operator):
     bl_idname = 'view3d.t3d_make_tiles_real'

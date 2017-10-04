@@ -75,12 +75,6 @@ def parse_rules(text):
     return Ruleset(rules, default)
 
 class AutoTiler3D(Tilemap3D):
-    # todo ok this is still really inefficient for region operations (fill/clear)
-    # in such cases each cell can be repainted up to 6 times!
-    # the code is much simpler this way though...
-    # otherwise would have to calculate the bitmasks of every cell we are operating on
-    # then go round and create all the objects
-    # sounds buggy
     def __init__(self, *args, **kw):
         Tilemap3D.__init__(self, *args, **kw)
         self.manual_mode = False
@@ -95,12 +89,12 @@ class AutoTiler3D(Tilemap3D):
     def init_rules(self):
         self.rulesets = {}
         for name, tileset in self.tilesets.items():
+            if not tileset.rules: continue
             text = bpy.data.texts[tileset.rules]
             try:
                 self.rulesets[name] = parse_rules(text)
             except ValueError as e:
-                self.error('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.rules, e.line_no, e.line))
-                raise e
+                raise Exception('"{}": Invalid bitmask, line {}: "{}"'.format(tileset.rules, e.line_no, e.line))
 
     def refresh_tilesets(self):
         Tilemap3D.refresh_tilesets(self)
@@ -244,7 +238,7 @@ class AutoTiler3D(Tilemap3D):
         # check adjacent cells if occupied
         center, adjacent = self.get_occupied()
         if not center: return # nothing to repaint
-        tileset = center[0].tileset
+        tileset = center[0].src_tileset
         if not tileset: return # just a normal object
 
         bitmask = self.get_bitmask(adjacent)

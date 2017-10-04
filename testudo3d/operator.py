@@ -270,16 +270,21 @@ class T3DOperatorBase:
 
     def invoke(self, context, event):
         if T3DOperatorBase.running_modal: return {'CANCELLED'}
-        T3DOperatorBase.running_modal = True
-        if context.area.type == 'VIEW_3D':
-            # init
-            self.init()
-            self.construct_select_cube()
-            self.init_handlers(context)
-            return {'RUNNING_MODAL'}
-        else:
+        if context.area.type != 'VIEW_3D':
             self.report({'WARNING'}, "View3D not found, cannot run operator")
             return {'CANCELLED'}
+
+        try:
+            self.init()
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+            self.on_quit()
+            # todo if invoke after error, StructRNA of type ... has been removed
+            return {'CANCELLED'}
+        self.construct_select_cube()
+        self.init_handlers(context)
+        T3DOperatorBase.running_modal = True
+        return {'RUNNING_MODAL'}
 
     def error(self, msg):
         self.report({'ERROR'}, msg)
@@ -545,32 +550,23 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
 
     def init(self):
         AutoTiler3D.init(self)
-        # self.validate_tilesets() # don't care anymore
         self.validate_rules()
 
-    def validate_tilesets(self):
-        notfound = []
-        for obj in bpy.context.scene.objects:
-            try:
-                tileset = obj.tileset
-            except KeyError:
-                if tileset not in notfound:
-                    notfound.append(tileset)
-        if notfound:
-            for tileset in notfound:
-                self.error('Tileset "{}" present in scene but rules not found! (did you rename rules.txt file? use RenameTileset)'.format(tileset))
-            self.on_quit()
-
     def validate_rules(self):
-        tiles = [group.name for group in bpy.data.groups]
-        for name, value in self.rulesets.items():
+        for name, ruleset in self.rulesets.items():
+            tileset = self.tilesets[name]
             notfound = []
-            for rule in value.rules.values():
+            for rule in ruleset.rules.values():
                 for tile3d in rule.tiles:
-                    if tile3d not in tiles and tile3d not in notfound:
+                    if tile3d not in tileset.tiles and tile3d not in notfound:
                         notfound.append(tile3d)
-                for tile3d in notfound:
-                    self.report({'WARNING'}, 'Tile "{}" not found in blend (did you link your tiles?)'.format(tile3d))
+            for tile3d in ruleset.default.tiles:
+                if tile3d not in tileset.tiles and tile3d not in notfound:
+                    notfound.append(tile3d)
+            for tile3d in notfound:
+                self.report({'WARNING'}, 'Tile "{}" not found in tileset "{}"'.format(tile3d, name))
+            if notfound:
+                raise Exception('invalid rules')
 
     def on_quit(self):
         AutoTiler3D.on_quit(self)
