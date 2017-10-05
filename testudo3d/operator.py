@@ -560,9 +560,10 @@ class AutoModeOperator(AutoTiler3D, T3DOperatorBase, Operator):
                 for tile3d in rule.tiles:
                     if tile3d not in tileset.tiles and tile3d not in notfound:
                         notfound.append(tile3d)
-            for tile3d in ruleset.default.tiles:
-                if tile3d not in tileset.tiles and tile3d not in notfound:
-                    notfound.append(tile3d)
+            if ruleset.default:
+                for tile3d in ruleset.default.tiles:
+                    if tile3d not in tileset.tiles and tile3d not in notfound:
+                        notfound.append(tile3d)
             for tile3d in notfound:
                 self.report({'WARNING'}, 'Tile "{}" not found in tileset "{}"'.format(tile3d, name))
             if notfound:

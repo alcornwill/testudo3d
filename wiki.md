@@ -21,10 +21,13 @@ __Note__ if you intend to use for game development, you will have to figure out 
 If you can't figure out how to import a scene made with blender into your game engine, 
 this tool will not be much use to you as a level editor.
 
+**Tested with 2.78 and 2.79**
+
 __Limitations__
 * Blender doesn't perform as well as you might expect with 100's of objects in the scene.
 To avoid dissapointment, try making a scene *now* that has the amount of objects you need
 * auto-tiling doesn't do **diagonals** or **terrain**
+* tiles must be 1x1x1
 * can only undo once exit modal operator (but it does work)
 * controls not configurable (todo)
 
@@ -115,6 +118,7 @@ A tile must belong to a **Tileset**.
 This will set the tileset name on a custom property on the object.
   
 Tiles can be any size, though they must be **1x1x1** to tile.  
+(actually, there is a hack for changing tile z. on a root empty, change the custom property 't3d_tile_size_z')  
 Since they're just objects, you can add, delete, move them around and rotate them by hand if you want  
 
 __Tip__: use __Align Tiles__ to align objects to grid. (3DView > T3D > Utils > Align Tiles)  

@@ -317,6 +317,19 @@ class T3DProperties(PropertyGroup):
         set=set_down
     )
 
+    rg_wall = StringProperty(
+        name='Wall',
+        description='Wall object for Room Gen'
+    )
+    rg_floor = StringProperty(
+        name='Floor',
+        description='Floor object for Room Gen'
+    )
+    rg_ceiling = StringProperty(
+        name='Ceiling',
+        description='Ceiling object for Room Gen'
+    )
+
 class TilesetActionsOperator(bpy.types.Operator):
     bl_idname = "view3d.t3d_tileset_actions"
     bl_label = "Tileset Actions"
@@ -431,7 +444,11 @@ class T3DUtilsPanel(Panel):
         layout.separator()
         col = layout.column(align=True)
         col.operator(RoomGenOperator.bl_idname)
+        col.prop_search(prop, 'rg_wall', bpy.data, 'groups')
+        col.prop_search(prop, 'rg_floor', bpy.data, 'groups')
+        col.prop_search(prop, 'rg_ceiling', bpy.data, 'groups')
         col.prop(prop, 'roomgen_name', text='')
+        layout.separator()
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         # layout.operator(XmlExportOperator.bl_idname)
@@ -564,8 +581,8 @@ class AlignTiles(Operator):
 
 class T3DSetupTilesOperator(Operator):
     bl_idname = 'view3d.t3d_setup_tiles'
-    bl_label = 'Setup 3D Tiles'
-    bl_description = 'Setup objects in scene as tiles'
+    bl_label = 'Setup 3D Tiles' # todo rename 'Setup Dupli-Groups'
+    bl_description = 'Put every top-level object in scene in a unique group, so can be duplicated'
 
     def __init__(self):
         bpy.types.Operator.__init__(self)
@@ -645,8 +662,12 @@ class RoomGenOperator(Operator):
         return context.mode == "OBJECT" and not T3DOperatorBase.running_modal
 
     def execute(self, context):
-        name = context.scene.t3d_prop.roomgen_name
-        self.make_tileset(name, 'Wall', 'Ceiling', 'Floor')
+        prop = context.scene.t3d_prop
+        name = prop.roomgen_name
+        wall = prop.rg_wall
+        floor = prop.rg_floor
+        ceiling = prop.rg_ceiling
+        self.make_tileset(name, wall, ceiling, floor)
         return {'FINISHED'}
 
     def make_tileset(self, name, wall, ceiling, floor):
@@ -665,7 +686,10 @@ class RoomGenOperator(Operator):
             scene = bpy.data.scenes.new(name=name)
         bpy.context.screen.scene = scene
 
+        tileset = name
         name = name.lower()
+
+        tiles = []
 
         index = 0
         lines = []
@@ -693,6 +717,7 @@ class RoomGenOperator(Operator):
                 # if not objs: continue
                 bpy.ops.object.empty_add()
                 empty = bpy.context.object
+                tiles.append(empty)
                 empty.name = name + format(index, '02d')
                 empty.name = name + format(index, '02d') # insist (can't reuse objects
                 empty.empty_draw_size = 0
@@ -716,7 +741,9 @@ class RoomGenOperator(Operator):
             text.write(line)
 
         bpy.ops.view3d.t3d_setup_tiles()
-        scene.rules = text_name
+
+        for tile3d in tiles:
+            tile3d.tileset = tileset
 
 class MakeTilesRealOperator(Operator):
     bl_idname = 'view3d.t3d_make_tiles_real'
