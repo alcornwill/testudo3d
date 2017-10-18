@@ -1,20 +1,17 @@
 # Intro
 **Testudo3D (T3D)** adds an interactive mode to help place tiling modules.  
-T3D simply helps create and position [dupli-groups](https://docs.blender.org/manual/en/dev/editors/3dview/object/properties/duplication/dupligroup.html),
-there's nothing fancy going on.    
+T3D simply helps create and position 
+[dupli-groups](https://docs.blender.org/manual/en/dev/editors/3dview/object/properties/duplication/dupligroup.html).  
 Expert users can use **auto-tiling** to procedurally generate tilemaps.
 
 This tool was initially designed for game developers,
 but it could have some interesting uses beyond game development.  
-Modular level design is a ubiquitous technique in the game industry.  
-3D tilemaps are a higher level of modularity, with more limited usages.  
-Most of all tilemapping is fun to use, and removes the tedium of placing modules by hand.  
   
 Using Blender as a level editor is a radical choice, but there are compelling reasons to try it:
 * do modeling and level design simultaneously
 * use the program you are already comfortable with
 * game engine independent (no platform lock-in!)
-* blender is free and open source (all addons are open source too)
+* blender is free and open source
 * blender is easy to script and extend with addons
 
 __Note__ if you intend to use for game development, you will have to figure out the __export__ part yourself.  
@@ -25,7 +22,6 @@ this tool will not be much use to you as a level editor.
 
 __Limitations__
 * Blender doesn't perform as well as you might expect with 100's of objects in the scene.
-To avoid dissapointment, try making a scene *now* that has the amount of objects you need
 * auto-tiling doesn't do **diagonals** or **terrain**
 * tiles must be 1x1x1
 * can only undo once exit modal operator (but it does work)
@@ -53,7 +49,7 @@ You will find all the tool's operators in the __T3D tab__. (3DView > T3D)
   
 # T3D Tab
   
-![tools panel](images/tools panel.png)  
+![tools panel](images/tools_panel.png)  
 *tools panel*
   
 __Tools Panel__
@@ -64,7 +60,7 @@ __Tools Panel__
 * __Tileset List__ the list of tilesets in the blend. A Tileset can have __rules__.
 * __Refresh Tilesets__ refresh the tileset list
 
-![drawing panel](images/drawing panel.png)  
+![drawing panel](images/drawing_panel.png)  
 *drawing panel*
 
 **Drawing Panel**
@@ -77,7 +73,7 @@ __Tools Panel__
 * **Outline** draw an outline instead of a filled circle
 * **Brush Size** the size of the circle
 
-![utils panel](images/utils panel.png)  
+![utils panel](images/utils_panel.png)  
 *utils panel*
 
 **Utils Panel**
@@ -88,11 +84,17 @@ __Tools Panel__
 * **Make Tiles Real** like 'Make Duplicates Real' but only top-level
 * **Align Tiles** align objects to the grid (if you have been moving by hand)
 
+![obj properties panel](images/obj_properties_panel.png)  
+*object properties panel*
+
+**Object Properties Panel**
+* **Tileset** The name of the tileset this object belongs to (greyed out if not pressed **Setup 3D Tiles**)
+
 # Workflow
 overview
 * Create a set of tiles
 * use **Setup 3D Tiles** to automatically create groups for every object in the scene and arrange them nicely
-* add the tiles to a **Tileset** (use **Set Tileset**)
+* add the tiles to a **Tileset** (select object, Properties > Object > T3D > Tileset)
 * refresh the tileset list
 
 additionally, if using auto-tiling
@@ -105,7 +107,7 @@ if you just want to get started.
 
 # Tiles
 a **Tile** is just a [group instance](http://blender-manual-i18n.readthedocs.io/ja/latest/modeling/groups.html).  
-However, you should not create groups yourself, as **Setup 3D Tiles** will do this automatically.  
+You should not create groups yourself as **Setup 3D Tiles** will do this automatically.  
 
 To create a tile:
 * Create a top-level object in the scene. The object can have any number of children.  
@@ -113,14 +115,15 @@ The __object origin__ should be at the bottom of the tile (see sample blends for
 * press **Setup 3D Tiles**.  
 This will add the tile and it's children to a **group** of the same name, so it can be [duplicated](https://docs.blender.org/manual/en/dev/editors/3dview/object/properties/duplication/dupligroup.html).  
 It will also layout your tiles nicely
-* use **Set Tileset**  
-A tile must belong to a **Tileset**.  
-This will set the tileset name on a custom property on the object.
+* set the **Tileset** (select object, Properties > Object > T3D > Tileset)  
+A tile must belong to a Tileset.  
+To add multiple tiles to a tileset at once, use **Copy To Selected**
   
 Tiles can be any size, though they must be **1x1x1** to tile.  
 (actually, there is a hack for changing tile z. on a root empty, change the custom property 't3d_tile_size_z')  
 Since they're just objects, you can add, delete, move them around and rotate them by hand if you want  
 
+__Tip__: **Setup 3D Tiles** will not operate on hidden objects, if you want to exclude certain objects  
 __Tip__: use __Align Tiles__ to align objects to grid. (3DView > T3D > Utils > Align Tiles)  
 __Note__: some object types cannot be duplicated with dupli-groups
 
@@ -136,7 +139,7 @@ If you are using **auto-tiling**, you can set the rules in the tileset list
 # Roots
 When you run Manual/Auto Mode, an empty called 'Root' will pop up in your scene  
 Using multiple roots can help organize your scene.  
-roots can have any transformation, they do not have to stay at 0,0,0  
+Roots can have any transformation, they do not have to stay at 0,0,0  
 This helps you create levels that feel more organic, as you can break right-angles by rotating the root  
 
 Any object under a root will be treated as a tile, 
@@ -179,7 +182,8 @@ e.g.
 each bit of the bitmask corresponds to a direction:  
 ```
 DUWSEN
-Down Up West South East North
+Down Up West South East North  
+(North is +y and East is +x)
 ```  
 ```
 0 = unoccipied  
@@ -195,6 +199,7 @@ The 6-bit design was chosen in favor of simplicity, but it could be extended
 *rules (samples/pipes.blend)*  
 
 If there are multiple tiles per bitmask, a __random__ tile will be chosen.  
+This also supports wildcards (e.g. wall_* will be expanded to wall_a, wall_b, wall_c, ...)  
 The __default__ tile will be used when no rule is defined for a specific bitmask
 
 
@@ -212,10 +217,11 @@ you may be able to use **Room Gen** to generate your **tiles** and **rules**
 * choose the new tileset name
 * press **Room Gen** 
 
-this should generate your tiles and rules. __Setup 3D Tiles__ is automatically called   
+This will generate your tiles and rules. __Setup 3D Tiles__ is automatically called.  
+The Wall should be facing north
 (for an example see __testudo3d/samples/house.blend__)
 
-![room gen](images/room gen2.png)  
+![room gen](images/room_gen2.png)  
 *room gen*
 
 # Make Tiles Real

@@ -50,6 +50,16 @@ def parse_rules(text):
         if not any(split): continue
         a = split[0]
         b = split[1:]
+        newb = []
+        for tilename in b:
+            if tilename.endswith('*'):
+                # wildcard
+                tilename = tilename.replace('*', '')
+                tiles = [group.name for group in bpy.data.groups if group.name.startswith(tilename)]
+                newb += tiles
+            else:
+                newb.append(tilename)
+        b = newb
         if not b: continue # none or default
         try:
             n = int(a, 2)
@@ -84,6 +94,8 @@ class AutoTiler3D(Tilemap3D):
 
     def init(self):
         Tilemap3D.init(self)
+        if not self.tilesets:
+            raise Exception('No tilesets')
         self.init_rules()
 
     def init_rules(self):

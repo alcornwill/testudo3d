@@ -25,7 +25,7 @@ bl_info = {
     "location": "3D View > Tools > T3D",
     "description": "create 3D tilemaps",
     "warning": "",
-    "wiki_url": "",
+    "wiki_url": "https://github.com/alcornwill/testudo3d",
     "category": "3D View",
 }
 
@@ -583,11 +583,14 @@ class T3DSetupTilesOperator(Operator):
     bl_idname = 'view3d.t3d_setup_tiles'
     bl_label = 'Setup 3D Tiles' # todo rename 'Setup Dupli-Groups'
     bl_description = 'Put every top-level object in scene in a unique group, so can be duplicated'
-
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    layout_grid = BoolProperty(name='Layout In Grid', description='Layout in grid')
+    
     def __init__(self):
         bpy.types.Operator.__init__(self)
         self.objects = None
-
+        
     @classmethod
     def poll(self, context):
         return context.mode == "OBJECT" and not T3DOperatorBase.running_modal
@@ -640,8 +643,10 @@ class T3DSetupTilesOperator(Operator):
     def setup_tiles(self, context):
         self.objects = [obj for obj in bpy.context.scene.objects if not obj.parent and not obj.hide]
         self.rename_objects()
-        self.layout_in_grid()
+        if self.layout_grid:
+            self.layout_in_grid()
         self.create_groups()
+        self.report({'INFO'}, '{} objects added to groups'.format(len(self.objects)))
 
 class RoomGenOperator(Operator):
     bl_idname = 'view3d.t3d_room_gen'
@@ -671,12 +676,13 @@ class RoomGenOperator(Operator):
         return {'FINISHED'}
 
     def make_tileset(self, name, wall, ceiling, floor):
-        if (wall not in bpy.data.groups or
-            ceiling not in bpy.data.groups or
-            floor not in bpy.data.groups):
+        haswall =    bool(wall)    or wall    in bpy.data.groups
+        hasceiling = bool(ceiling) or ceiling in bpy.data.groups
+        hasfloor =   bool(floor)   or floor   in bpy.data.groups
+        if not haswall and not hasceiling and not hasfloor:
             self.report({'WARNING'}, 'group "Wall", "Floor" or "Ceiling" not found, no tiles generated')
             return
-
+            
         if name in bpy.data.scenes:
             # reuse
             scene = bpy.data.scenes[name]
@@ -689,7 +695,7 @@ class RoomGenOperator(Operator):
         tileset = name
         name = name.lower()
 
-        tiles = []
+        tiles = {}
 
         index = 0
         lines = []
@@ -697,38 +703,43 @@ class RoomGenOperator(Operator):
             c = j & 0b01
             f = j & 0b10
             for m in self.masks:
-                objs = []
-                # walls
-                for i in range(4):
-                    w = m & 1 << i
-                    if not w:
-                        obj = create_group_instance(wall)
-                        obj.rotation_euler.z = radians(i * -90)
-                        objs.append(obj)
-                # ceiling
-                if not c:
-                    obj = create_group_instance(ceiling)
-                    objs.append(obj)
-                # floor
-                if not f:
-                    obj = create_group_instance(floor)
-                    objs.append(obj)
-
-                # if not objs: continue
-                bpy.ops.object.empty_add()
-                empty = bpy.context.object
-                tiles.append(empty)
-                empty.name = name + format(index, '02d')
-                empty.name = name + format(index, '02d') # insist (can't reuse objects
-                empty.empty_draw_size = 0
-                for obj in objs:
-                    obj.parent = empty
-
                 rule = (j << 4) | m
-                rulestr = "{} {}\n".format(format(rule, '06b'), empty.name)
-                lines.append(rulestr)
+                filter = hasfloor << 5 | hasceiling << 4 | haswall << 3 | haswall << 2 | haswall << 1 | haswall
+                newrule = rule & filter
+                if newrule in tiles:
+                    tilename = tiles[newrule].name
+                else:
+                    objs = []
+                    # walls
+                    for i in range(4):
+                        w = m & 1 << i
+                        if not w and haswall:
+                            obj = create_group_instance(wall)
+                            obj.rotation_euler.z = radians(i * -90)
+                            objs.append(obj)
+                    # ceiling
+                    if not c and hasceiling:
+                        obj = create_group_instance(ceiling)
+                        objs.append(obj)
+                    # floor
+                    if not f and hasfloor:
+                        obj = create_group_instance(floor)
+                        objs.append(obj)
+                        
+                    bpy.ops.object.empty_add()
+                    empty = bpy.context.object
+                    empty.name = name + format(index, '02d')
+                    empty.name = name + format(index, '02d') # insist (can't reuse objects
+                    empty.empty_draw_size = 0
+                    for obj in objs:
+                        obj.parent = empty
 
-                index += 1
+                    tiles[rule] = empty
+                    tilename = empty.name
+                    index += 1
+
+                rulestr = "{} {}\n".format(format(rule, '06b'), tilename)
+                lines.append(rulestr)
 
         text_name = name+'.txt'
         if text_name in bpy.data.texts:
@@ -740,9 +751,9 @@ class RoomGenOperator(Operator):
         for line in lines:
             text.write(line)
 
-        bpy.ops.view3d.t3d_setup_tiles()
+        bpy.ops.view3d.t3d_setup_tiles(layout_grid=True)
 
-        for tile3d in tiles:
+        for tile3d in tiles.values():
             tile3d.tileset = tileset
 
 class MakeTilesRealOperator(Operator):
