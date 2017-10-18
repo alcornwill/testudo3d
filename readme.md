@@ -15,3 +15,7 @@ Features:
 * implements [turtle graphics](https://en.wikipedia.org/wiki/Turtle_graphics)! (hence the name)
 
 see [wiki.md](wiki.md) for more info
+
+#### Donate
+If you like this tool, a donation would be very much appreciated!  
+[PayPal](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=J6B2UJMZNRR7C)
