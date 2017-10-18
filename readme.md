@@ -8,11 +8,13 @@ add-on that adds tilemapping functionality to Blender.
 Features:
 * grab, copy and paste regions of tiles 
 * fast mouse controls or precise keyboard controls
+* paint with tiles using variable size brush
 * auto-tiling
+* randomization
 * use multiple 'roots' and transform them to break repetition
 * Blender's layers work perfectly to manage detailed scenes
-* auto-generate tilesets from just a wall, floor and ceiling mesh
-* implements [turtle graphics](https://en.wikipedia.org/wiki/Turtle_graphics)! (hence the name)
+* automatic tileset generation
+* implements [turtle graphics](https://en.wikipedia.org/wiki/Turtle_graphics) (hence the name)
 
 see [wiki.md](wiki.md) for more info
 

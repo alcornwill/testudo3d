@@ -352,7 +352,7 @@ class Tilemap3D:
             # todo
             # might be because finder should have been invalidated
             # might be because drawing routines are dodgey and go over same cell twice
-            logging.warning('Object deleted twice')
+            logging.debug('WARNING: Object deleted twice')
         logging.debug("deleted 1 object")
 
     def cdraw(self):
