@@ -147,7 +147,32 @@ class T3DProperties(PropertyGroup):
         description='Use outline brush',
         default=False
     )
+    
+    bdown = BoolProperty()
+    bup = BoolProperty()
+    bwest = BoolProperty()
+    bsouth = BoolProperty()
+    beast = BoolProperty()
+    bnorth = BoolProperty()
+    bnorthwest = BoolProperty()
+    bsouthwest = BoolProperty()
+    bsoutheast = BoolProperty()
+    bnortheast = BoolProperty()
 
+    def get_rule_text(self):
+        text = ""
+        text += "1" if self.bnorthwest else "0"
+        text += "1" if self.bsouthwest else "0"
+        text += "1" if self.bsoutheast else "0"
+        text += "1" if self.bnortheast else "0"
+        text += "1" if self.bdown else "0"
+        text += "1" if self.bup else "0"
+        text += "1" if self.bwest else "0"
+        text += "1" if self.bsouth else "0"
+        text += "1" if self.beast else "0"
+        text += "1" if self.bnorth else "0"
+        return text
+    
     def get_cursor_pos(self):
         if T3DOperatorBase.running_modal:
             vec = t3d.cursor.pos.copy()
@@ -452,6 +477,34 @@ class T3DUtilsPanel(Panel):
         layout.operator(MakeTilesRealOperator.bl_idname)
         layout.operator(AlignTiles.bl_idname)
         # layout.operator(XmlExportOperator.bl_idname)
+        
+        layout.separator()
+        layout.label("Rule Builder:")
+        col = layout.column()
+        row = col.row()
+        row.prop(prop, "bnorthwest", text="")
+        row.prop(prop, "bnorth", text="")
+        row.prop(prop, "bnortheast", text="")
+        row.separator()
+        row.separator()
+        row.prop(prop, "bup", text="up")
+        row = col.row()
+        row.prop(prop, "bwest", text="")
+        row.separator()
+        row.separator()
+        row.prop(prop, "beast", text="")
+        row = col.row()
+        row.prop(prop, "bsouthwest", text="")
+        row.prop(prop, "bsouth", text="")
+        row.prop(prop, "bsoutheast", text="")
+        row.separator()
+        row.separator()
+        row.prop(prop, "bdown", text="down")
+        
+        row = layout.row()
+        text = prop.get_rule_text()
+        row.label(text)
+        row.operator(CopyRuleToClipboard.bl_idname, text="", icon="COPYDOWN")
 
 class T3DObjectPanel(Panel):
     bl_idname = 'OBJECT_PT_t3d_object_panel'
@@ -558,6 +611,17 @@ class Goto3DCursor(Operator):
         bpy.ops.ed.undo_push()
         return {'FINISHED'}
 
+class CopyRuleToClipboard(Operator):
+    bl_idname = 'view_3d.t3d_copy_rule_to_clipboard'
+    bl_label = 'Copy Rule To Clipboard'
+    bl_description = 'Copy rule bitmask text to clipboard'
+
+    def execute(self, context):
+        prop = context.scene.t3d_prop
+        text = prop.get_bitmask()
+        bpy.context.window_manager.clipboard = text
+        return {'FINISHED'}
+        
 class AlignTiles(Operator):
     bl_idname = 'view_3d.t3d_align_tiles'
     bl_label = 'Align Tiles'
